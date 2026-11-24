@@ -67,4 +67,5 @@ Thumbs.db
 *.log
 
 # Documentation
-AGENTS.md
+*.md
+!README.md

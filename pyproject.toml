@@ -1,0 +1,50 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "proteus-music"
+version = "0.1.0"
+description = "Local-first music organization engine that turns large libraries into cohesive, non-overlapping playlists."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.1",
+    "platformdirs>=4.3",
+    "pydantic>=2.10",
+    "scikit-learn>=1.6",
+    "scipy>=1.15",
+    "typer>=0.15",
+]
+
+[project.scripts]
+proteus = "proteus_music.cli.main:app"
+
+[dependency-groups]
+dev = ["maturin>=1.16,<2", "pytest>=8.3", "ruff>=0.9"]
+
+[tool.maturin]
+manifest-path = "crates/proteus-core/Cargo.toml"
+module-name = "proteus_music._native"
+python-source = "src"
+features = ["pyo3/extension-module"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "crates/**/*.rs" }]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "proteus_music.engine.features.metadata.FeatureWeights",
+    "proteus_music.integrations.contract.ExportOptions",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
