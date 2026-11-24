@@ -18,12 +18,15 @@ Early development, usable from the command line and installable from source only
   - Optional minimum and maximum playlist sizes.
   - Infeasible requests are rejected with reasons before any heavy computation.
   - Every result is validated independently before it is saved, shown or exported, and saved with its configuration, seed, feature version, quality metrics, count-selection trace and category evidence.
+- **Local web interface:** `proteus serve` covers import, organization, playlist and flagged-track inspection, and export, using the same services as the CLI. See [Web interface](#web-interface).
+- **Acoustic analysis:** CPU-only loudness, spectral, timbre (MFCC) and tempo features from permitted local audio, cached by file identity, fused with metadata. See [Acoustic analysis](#acoustic-analysis).
+- **Duplicate candidates:** Chromaprint-style fingerprints list possible duplicate recordings for review; nothing is merged automatically.
 - **Enrichment (optional, opt-in):** MusicBrainz lookups by ISRC or MusicBrainz recording ID, using CC0 core data only. See [Metadata enrichment](#metadata-enrichment).
 - **Exports:** M3U8 (one file per playlist, absolute or relative paths), CSV, and JSON (which can be re-imported). Tracks that cannot be exported are reported, and existing files are never overwritten unless requested.
 
 ### Planned
 
-Acoustic features and audio embeddings, fingerprint-based duplicate detection, title/artist search for enrichment, additional clustering algorithms (density- and graph-based), the local web interface (`proteus serve`), authorized streaming-service adapters (Spotify, Apple Music, YouTube), and packaged releases. Platform integrations are subject to API availability, authorization, and applicable data-use policies.
+Audio embeddings, reviewed duplicate merging, title/artist search for enrichment, additional clustering algorithms (density- and graph-based), visual exploration and manual playlist editing in the web interface, authorized streaming-service adapters (Spotify, Apple Music, YouTube), and packaged releases. Platform integrations are subject to API availability, authorization, and applicable data-use policies.
 
 ## Install from source
 
@@ -62,6 +65,74 @@ proteus export --target csv --out ./playlists
 The library database defaults to the per-user data directory. Override it with `--db PATH` or `PROTEUS_DB`. Exit codes: `1` error or invalid configuration, `2` infeasible constraints, `3` partial export.
 
 If a CSV or JSON file comes from a provider whose terms restrict analysis or machine-learning use of its data, import it with `--identification-only`.
+
+## Web interface
+
+```sh
+npm --prefix frontend ci && npm --prefix frontend run build   # once, from a source checkout
+proteus serve                                                # opens http://localhost:8765/
+```
+
+The page covers the core workflow:
+1. Import a CSV, JSON or M3U file, or a local audio folder.
+2. Organize in autonomous mode or with an exact count, a range or categories, plus optional size limits and a feature set.
+3. Inspect playlists, their descriptions and flagged tracks.
+4. Export the selected saved result as M3U8, CSV or JSON.
+
+Imports, organization and exports run as background jobs with stage progress, cancellation and actionable error messages. Infeasible requests list their reasons. Results are written in one transaction at the end, so a failed or cancelled job saves nothing. The CLI and the web interface read the same database and the same saved results.
+
+**Protections:**
+- The server binds to `127.0.0.1` and refuses other interfaces unless you pass `--allow-remote`.
+- Every API request must carry a per-session token that is embedded only in the served page.
+- The `Host` header must name the server, which defeats DNS rebinding, and cross-origin requests are rejected.
+- Paths typed into the UI must be absolute and inside the allowed folders (your home directory by default; change with `--allow-root`). Import paths must be existing files of the right type or existing folders. Exports never overwrite unless you tick the box.
+
+## Acoustic analysis
+
+```sh
+proteus import local ~/Music                     # or CSV/JSON/M3U entries with file paths
+proteus analyze audio                            # decode and describe permitted files (cached)
+proteus organize --mode auto                     # fused metadata + audio (the default)
+proteus organize --mode auto --features metadata # or: audio
+proteus analyze duplicates                       # fingerprint duplicate candidates, review only
+```
+
+Only files referenced by analysis-permitted source records are decoded, and they are never modified. Decoding runs natively, in parallel, in batches of 16 files (`--batch-size`, `--threads`). Each file contributes a mono excerpt of at most 30 s (`--excerpt-seconds`), taken from the middle of longer tracks.
+
+Every outcome is cached in SQLite, keyed by path, size, modification time and extractor version, so unchanged files are never decoded twice. Decode failures are cached too, so they aren't retried until the file changes.
+
+**Codecs, verified with real encodes:**
+- Decoded: MP3, FLAC, WAV/PCM, AAC (M4A and ADTS), ALAC, Ogg Vorbis.
+- Not decoded: Opus (Symphonia has no Opus decoder) and CAF containers. These are reported as unanalyzable.
+
+**Features (`acoustic-v1`):**
+- RMS loudness (dBFS, not LUFS) and loudness range.
+- Spectral centroid mean and spread, bandwidth, 85% rolloff and flatness, all computed over 0–11.025 kHz so files at different sample rates compare.
+- 13 mean MFCCs over 40 mel bands (timbre).
+- Tempo from a spectral-flux onset autocorrelation. It is reported only when onsets are pronounced and the periodicity is strong, so noise, pads and steady tones have no tempo rather than a guessed one. On synthetic click tracks it was within 1.5% from 80 to 174 BPM.
+
+**Fusion:**
+- Acoustic features are z-scored across the library's analyzed tracks and form a block weighted 0.30 next to the metadata blocks. Tempo is a separate 0.05 block, a soft log-tempo histogram.
+- Availability masks mean a track without analyzed audio contributes no acoustic evidence, and its other blocks are renormalized.
+- `--features metadata` reproduces the metadata-only results exactly, and so does `fused` when no audio has been analyzed. Category names are matched against metadata, so categories need `fused` or `metadata`.
+- Playlist descriptions add a separate "Measured audio" phrase (median tempo, loudness and spectral centroid), distinct from the metadata-derived genres and tags.
+
+`benchmarks/acoustic.py` compares feature sets on a synthetic collection: four synthesized styles, AAC/FLAC/WAV, 25% wrong genres, 30% missing genres and tags, and 15% of tracks without audio. On 400 tracks:
+
+| Feature set | ARI, exact 4 | ARI, auto | Auto playlists |
+| --- | --- | --- | --- |
+| metadata | 0.51 | 0.51 | 4 |
+| audio | 0.69 | 0.50 | 9 (over-split) |
+| fused | 0.82–0.84 | 0.82–0.84 | 4 |
+
+Cold analysis of 344 files (30 s each) took 3.5 s on an Apple M5 Pro; the warm run took 0.01 s. These are synthetic sounds: they test mechanics, not listening quality. Audio alone over-splits in auto mode, so fused is the default.
+
+**Duplicate candidates:** `benchmarks/fingerprints.py` compares a synthetic song against variants of it.
+- Same recording: re-encodes and level or rate changes score 0.96–1.00.
+- **A remaster scores 0.95**, so it is indistinguishable from a lossy re-encode.
+- A radio edit scores 0.77, an extended mix 0.56, a live performance 0.30 and an unrelated song 0.18.
+
+Because no threshold separates a remaster from a copy, fingerprints never merge tracks. `proteus analyze duplicates` lists pairs above 0.6 with a note when their version descriptors differ, for you to review. The identity rules stay as they were.
 
 ## Metadata enrichment
 
@@ -154,12 +225,15 @@ In auto mode on the synthetic libraries:
 | `src/proteus_music/playlists` | Organization and export services shared by all interfaces. |
 | `src/proteus_music/storage` | SQLite persistence with versioned migrations. |
 | `src/proteus_music/cli` | Thin Typer CLI. |
+| `src/proteus_music/api` | FastAPI app for `proteus serve`: local-only protections, jobs, typed views. |
+| `frontend/` | React/TypeScript interface, built into `src/proteus_music/api/static/` (not committed). |
 | `benchmarks/` | Synthetic-library quality and performance benchmarks (not part of the package). |
 
 ## Limitations
 
 - Enrichment looks up identifiers only; tracks with neither an ISRC nor a MusicBrainz ID cannot be enriched yet. Release years come from the at most 25 releases MusicBrainz returns per recording.
-- Organization uses metadata only (genres, tags, artists, decade). It has no acoustic understanding yet. Categories work only as well as the library's genre and tag vocabulary; there are no synonyms ("Chill" does not match "calm").
+- Acoustic features are conventional signal statistics, not learned embeddings, and no listening review has been done yet. Opus files cannot be decoded.
+- Organization uses metadata (genres, tags, artists, decade) plus conventional audio statistics when analyzed. Categories work only as well as the library's genre and tag vocabulary; there are no synonyms ("Chill" does not match "calm").
 - Count selection is heuristic and was tuned on synthetic data. It has not yet been evaluated on real libraries or with listeners.
 - With only required categories and no count, every track must land in one of them. Tracks that fit none are flagged low-similarity instead of being left out.
 
@@ -170,6 +244,7 @@ Run the same checks as CI before submitting changes:
 ```sh
 uv run ruff format --check && uv run ruff check && uv run pytest
 cargo fmt --all --check && cargo clippy --all-targets -- -D warnings
+npm --prefix frontend ci && npm --prefix frontend run build   # strict type check + bundle
 ```
 
 After changing Rust code, `uv sync` rebuilds the extension. Tests use small synthetic fixtures only. Never commit music, databases, credentials or model weights.

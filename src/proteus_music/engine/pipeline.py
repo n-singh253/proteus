@@ -169,8 +169,9 @@ def _build(run: Run, labels, scores, qualities, k: int, unclassified: bool):
 def plan_playlists(
     descriptors: Sequence[TrackDescriptor],
     config: OrganizationConfig,
-    weights: FeatureWeights = FeatureWeights(),
+    weights: FeatureWeights | None = None,
 ) -> PlaylistPlan:
+    weights = weights or FeatureWeights.for_features(config.features)
     clock, timings = time.perf_counter, {}
     low, high = check_feasibility(len(descriptors), config)
     clusterer = get_clusterer(config.algorithm)

@@ -49,6 +49,21 @@ fn collect_candidates(root: &Path, recursive: bool) -> (Vec<PathBuf>, Vec<FileFa
     (paths, failures)
 }
 
+/// Run `work` on a dedicated pool of `max_threads` threads, or the global pool if unset.
+pub fn with_pool<T: Send>(
+    max_threads: Option<usize>,
+    work: impl FnOnce() -> T + Send,
+) -> Result<T, String> {
+    match max_threads {
+        Some(n) => Ok(rayon::ThreadPoolBuilder::new()
+            .num_threads(n.max(1))
+            .build()
+            .map_err(|e| e.to_string())?
+            .install(work)),
+        None => Ok(work()),
+    }
+}
+
 fn read_all(paths: &[PathBuf], max_threads: Option<usize>) -> Result<ReadOutcome, String> {
     let read = || -> Vec<Result<AudioFile, FileFailure>> {
         paths
@@ -56,14 +71,7 @@ fn read_all(paths: &[PathBuf], max_threads: Option<usize>) -> Result<ReadOutcome
             .map(|p| read_audio_file(p).map_err(|reason| failure(p, reason)))
             .collect()
     };
-    let results = match max_threads {
-        Some(n) => rayon::ThreadPoolBuilder::new()
-            .num_threads(n.max(1))
-            .build()
-            .map_err(|e| e.to_string())?
-            .install(read),
-        None => read(),
-    };
+    let results = with_pool(max_threads, read)?;
     let mut files = Vec::with_capacity(results.len());
     let mut failures = Vec::new();
     for result in results {

@@ -8,6 +8,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 
+import numpy as np
+
+from proteus_music.engine.features.acoustic import FEATURE_NAMES
 from proteus_music.engine.features.metadata import TrackDescriptor
 from proteus_music.library.identity import normalize_text
 
@@ -115,9 +118,26 @@ def _describe(vocab: _Vocabulary, group: Sequence[TrackDescriptor]) -> str:
             parts.append(f"{label}: {', '.join(t.display for t in terms)}.")
     if decades := vocab.terms(group, "decade"):
         parts.append(f"Mostly {decades[0].display}." if decades[0].share >= 0.5 else "Mixed eras.")
+    if measured := _measured(group):
+        parts.append(measured)
     if missing := sum(1 for d in group if not (d.genres or d.tags or d.artists or d.year)):
         parts.append(f"{missing} track(s) lack analyzable metadata.")
     return " ".join(parts)
+
+
+def _measured(group: Sequence[TrackDescriptor]) -> str:
+    """Medians of measured audio properties, kept apart from metadata-derived labels."""
+    analyzed = [d.acoustic for d in group if d.acoustic]
+    if not analyzed or len(analyzed) * 2 < len(group):
+        return ""
+    loudness = np.median([a.values[FEATURE_NAMES.index("loudness_db")] for a in analyzed])
+    centroid = np.median([a.values[FEATURE_NAMES.index("centroid_khz")] for a in analyzed])
+    tempi = [a.tempo_bpm for a in analyzed if a.tempo_bpm]
+    tempo = f"about {np.median(tempi):.0f} BPM, " if len(tempi) * 2 >= len(analyzed) else ""
+    return (
+        f"Measured audio ({len(analyzed)} track(s)): {tempo}{loudness:.0f} dBFS, "
+        f"spectral centroid {centroid:.1f} kHz."
+    )
 
 
 def _name_key(name: str) -> str:

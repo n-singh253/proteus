@@ -9,7 +9,7 @@ from typing import Annotated
 
 import typer
 
-from proteus_music.cli import enrich, imports, render
+from proteus_music.cli import analyze, enrich, imports, render, serve
 from proteus_music.cli.common import (
     EXIT_PARTIAL,
     MAX_LISTED_ISSUES,
@@ -19,7 +19,12 @@ from proteus_music.cli.common import (
 )
 from proteus_music.integrations.contract import ExportOptions
 from proteus_music.library.service import library_stats
-from proteus_music.models.organization import Category, OrganizationConfig, OrganizationMode
+from proteus_music.models.organization import (
+    Category,
+    FeatureSet,
+    OrganizationConfig,
+    OrganizationMode,
+)
 from proteus_music.playlists import service
 from proteus_music.storage import results as result_store
 from proteus_music.storage.tracks import load_tracks
@@ -30,6 +35,8 @@ app = typer.Typer(
 )
 app.add_typer(imports.app, name="import")
 app.add_typer(enrich.app, name="enrich")
+app.add_typer(analyze.app, name="analyze")
+app.command()(serve.serve)
 
 JsonFlag = Annotated[bool, typer.Option("--json", help="Print machine-readable JSON.")]
 
@@ -95,6 +102,9 @@ def organize(
         str, typer.Option(help="Clustering algorithm: kmeans-merge or spherical-kmeans.")
     ] = "kmeans-merge",
     seed: Annotated[int, typer.Option(help="Random seed for reproducibility.")] = 0,
+    features: Annotated[
+        FeatureSet, typer.Option(help="metadata, audio (analyzed local files) or fused.")
+    ] = FeatureSet.FUSED,
     as_json: JsonFlag = False,
 ) -> None:
     """Organize the whole library into exclusive playlists and save the result."""
@@ -109,6 +119,7 @@ def organize(
             max_size=max_size,
             algorithm=algorithm,
             seed=seed,
+            features=features,
         )
         conn = database(ctx)
         result = service.organize_library(conn, config)

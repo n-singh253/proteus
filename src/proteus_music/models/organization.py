@@ -15,6 +15,14 @@ class OrganizationMode(StrEnum):
     AUTO = "auto"
 
 
+class FeatureSet(StrEnum):
+    """Which representations organization may use; missing modalities always drop out."""
+
+    METADATA = "metadata"
+    AUDIO = "audio"
+    FUSED = "fused"
+
+
 class Category(BaseModel):
     """A user-named playlist. Required categories are hard constraints; preferred ones are
     created only when the collection supports them."""
@@ -46,6 +54,7 @@ class OrganizationConfig(BaseModel):
     min_size: int = Field(default=1, ge=1)
     max_size: int | None = Field(default=None, ge=1)
     algorithm: str = "kmeans-merge"
+    features: FeatureSet = FeatureSet.FUSED
     seed: int = 0
 
     @property
@@ -95,6 +104,8 @@ class OrganizationConfig(BaseModel):
                 "specify a playlist count, a playlist range or required categories, "
                 "or use auto mode"
             )
+        if self.features is FeatureSet.AUDIO and self.categories:
+            errors.append("categories are matched against metadata; use fused or metadata features")
         names = [" ".join(c.name.casefold().split()) for c in self.categories]
         if len(set(names)) != len(names):
             errors.append("category names must be unique")

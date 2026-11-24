@@ -20,9 +20,9 @@ def auto_upper_bound(
 ) -> int:
     """Upper candidate count for autonomous mode, adapted to the collection.
 
-    Bounded by how many practically sized playlists the analyzable tracks can fill, and by
-    the available musical information: twice the number of genre/tag terms shared by at least
-    a practical playlist's worth of tracks (terms combine, so groups can outnumber terms).
+    Bounded by how many practically sized playlists the analyzable tracks can fill, and, for
+    metadata-only representations, by the available musical information: twice the number of
+    genre/tag terms shared by at least a practical playlist's worth of tracks.
     """
     n = features.shape[0]
     if n == 0:
@@ -33,7 +33,10 @@ def auto_upper_bound(
         for (block, token), count in zip(columns, support, strict=True)
         if block in ("genre", "tags") and not token.startswith("word:") and count >= min_useful
     )
-    return max(1, min(MAX_AUTO_PLAYLISTS, n // min_useful, max(2, 2 * terms)))
+    # Acoustic features describe every analyzed track continuously, so the vocabulary bound
+    # applies only when the representation is purely metadata.
+    by_information = MAX_AUTO_PLAYLISTS if any(b == "acoustic" for b, _ in columns) else 2 * terms
+    return max(1, min(MAX_AUTO_PLAYLISTS, n // min_useful, max(2, by_information)))
 
 
 def _coarse_grid(low: int, high: int, points: int) -> list[int]:

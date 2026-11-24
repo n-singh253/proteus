@@ -77,6 +77,32 @@ MIGRATIONS: tuple[str, ...] = (
         PRIMARY KEY (provider, track_id)
     );
     """,
+    """
+    CREATE TABLE audio_analysis (
+        path TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        modified_ns INTEGER NOT NULL,
+        extractor TEXT NOT NULL,
+        status TEXT NOT NULL,
+        codec TEXT,
+        sample_rate INTEGER,
+        features TEXT,
+        tempo_bpm REAL,
+        tempo_confidence REAL,
+        error TEXT,
+        analyzed_at TEXT NOT NULL,
+        PRIMARY KEY (path, size_bytes, modified_ns, extractor)
+    );
+    CREATE TABLE audio_fingerprints (
+        path TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        modified_ns INTEGER NOT NULL,
+        algorithm TEXT NOT NULL,
+        fingerprint BLOB,
+        error TEXT,
+        PRIMARY KEY (path, size_bytes, modified_ns, algorithm)
+    );
+    """,
 )
 
 

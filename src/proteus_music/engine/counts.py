@@ -67,12 +67,15 @@ def count_range(run: Run, low: int, high: int) -> CountRange:
         return CountRange(low, high, False)
     if config.mode is not OrganizationMode.AUTO and not config.has_range:
         return CountRange(run.n_fixed, run.n_fixed, False)  # One playlist per category.
+    # The adaptive cap bounds musical playlists only; an Unclassified playlist is counted
+    # against the user's and the size limits (``high``), never against the cap.
+    cap = high
     if config.mode is OrganizationMode.AUTO or config.max_playlists is None:
         useful = metrics.practical_min_size(n)
         cap = selection.auto_upper_bound(
             run.features.matrix[run.features.core], run.features.columns, useful
         )
-        high = max(low, min(high, max(cap, run.n_required)))
+        cap = max(low, min(high, max(cap, run.n_required)))
     low = max(low, run.n_required)  # Preferred categories never raise the minimum.
     missing = n - n_analyzable
     fits = missing >= config.min_size and (config.max_size is None or missing <= config.max_size)
@@ -81,10 +84,10 @@ def count_range(run: Run, low: int, high: int) -> CountRange:
             return CountRange(0, 0, True)
         by_size = -(-n_analyzable // config.max_size) if config.max_size else 1
         k_low = max(low - 1, run.n_required, 1, by_size)
-        k_high = min(high - 1, n_analyzable // config.min_size)
+        k_high = min(high - 1, cap, n_analyzable // config.min_size)
         if n_analyzable and k_low <= k_high:
             return CountRange(k_low, k_high, True)
-    return CountRange(low, high, False)
+    return CountRange(low, cap, False)
 
 
 def select_count(run: Run, counts: CountRange) -> CountSelection:
