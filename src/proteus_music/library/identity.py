@@ -64,6 +64,16 @@ def parse_title(title: str) -> TitleParts:
     return TitleParts(base, "; ".join(versions) or None, tuple(featured))
 
 
+_VERSION_STEMS = {"remixed": "remix", "remastered": "remaster", "acappella": "a cappella"}
+
+
+def version_kinds(text: str) -> frozenset[str]:
+    """Version descriptors in free text: '(Live at Wembley)' and 'live, 1995' both give
+    {'live'}. Used to compare a local version with an external disambiguation."""
+    found = (m.group(0).casefold() for m in _VERSION_WORDS.finditer(text))
+    return frozenset(_VERSION_STEMS.get(w.replace(" ", ""), w) for w in found)
+
+
 def identity_key(record: TrackRecord) -> tuple[str, str, str]:
     parts = parse_title(record.title)
     artist = normalize_text(record.artists[0]) if record.artists else ""

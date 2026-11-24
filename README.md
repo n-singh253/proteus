@@ -18,11 +18,12 @@ Early development, usable from the command line and installable from source only
   - Optional minimum and maximum playlist sizes.
   - Infeasible requests are rejected with reasons before any heavy computation.
   - Every result is validated independently before it is saved, shown or exported, and saved with its configuration, seed, feature version, quality metrics, count-selection trace and category evidence.
+- **Enrichment (optional, opt-in):** MusicBrainz lookups by ISRC or MusicBrainz recording ID, using CC0 core data only. See [Metadata enrichment](#metadata-enrichment).
 - **Exports:** M3U8 (one file per playlist, absolute or relative paths), CSV, and JSON (which can be re-imported). Tracks that cannot be exported are reported, and existing files are never overwritten unless requested.
 
 ### Planned
 
-Acoustic features and audio embeddings, fingerprint-based duplicate detection, metadata enrichment, additional clustering algorithms (density- and graph-based), the local web interface (`proteus serve`), authorized streaming-service adapters (Spotify, Apple Music, YouTube), and packaged releases. Platform integrations are subject to API availability, authorization, and applicable data-use policies.
+Acoustic features and audio embeddings, fingerprint-based duplicate detection, title/artist search for enrichment, additional clustering algorithms (density- and graph-based), the local web interface (`proteus serve`), authorized streaming-service adapters (Spotify, Apple Music, YouTube), and packaged releases. Platform integrations are subject to API availability, authorization, and applicable data-use policies.
 
 ## Install from source
 
@@ -61,6 +62,31 @@ proteus export --target csv --out ./playlists
 The library database defaults to the per-user data directory. Override it with `--db PATH` or `PROTEUS_DB`. Exit codes: `1` error or invalid configuration, `2` infeasible constraints, `3` partial export.
 
 If a CSV or JSON file comes from a provider whose terms restrict analysis or machine-learning use of its data, import it with `--identification-only`.
+
+## Metadata enrichment
+
+Proteus can add independently licensed metadata from [MusicBrainz](https://musicbrainz.org). This is the only workflow that uses the network, and it is off unless you ask for it:
+
+```sh
+proteus enrich musicbrainz                       # dry run: shows what would be looked up, sends nothing
+proteus enrich musicbrainz --allow-network --contact "https://example.org/you-or-your-project"
+proteus organize --mode auto                     # re-organize with the enriched metadata
+```
+
+**What is sent:** only each track's ISRC or MusicBrainz recording ID, plus a User-Agent with the contact you give (`--contact` or `PROTEUS_MUSICBRAINZ_CONTACT`), as MusicBrainz requires. No titles, artists, files or library contents are sent. Tracks without either identifier are not looked up.
+
+**What is used:** only MusicBrainz core data, which is CC0: recording ID, title, artist credit, length, ISRCs and release dates. These provide artists and the earliest release year for analysis, plus identifiers. Tags and genre associations are supplementary data under CC BY-NC-SA, so they are never used. This means enrichment helps sparse tracks join playlists by artist and era, but adds no genres.
+
+**Matching:** a recording is accepted only when exactly one candidate agrees with the track on title, version (live, remix, remaster and so on, including MusicBrainz disambiguation), artist when known, and duration within 3 s when known.
+- Several consistent candidates count as *ambiguous*; inconsistent ones as *no-match*; an unknown identifier as *not-found*.
+- A recording already linked to another track is a *conflict*. All of these leave the track unchanged.
+- Each match is stored as a separate `musicbrainz` source record, so existing records and their identification-only restrictions are never modified.
+
+**Requests and resuming:**
+- Requests are spaced at least 1 s apart, and each run has a request budget (`--max-requests`, default 300).
+- HTTP 503 (throttling) and transient failures are retried up to 3 times with backoff; persistent throttling stops the run.
+- Every outcome is stored in SQLite with its query, confidence, license and refresh time, so an interrupted run resumes where it left off.
+- Matches are refreshed after 180 days, unmatched results after 30, and errors on the next run. `--refresh` forces new lookups.
 
 ## How organization works
 
@@ -132,6 +158,7 @@ In auto mode on the synthetic libraries:
 
 ## Limitations
 
+- Enrichment looks up identifiers only; tracks with neither an ISRC nor a MusicBrainz ID cannot be enriched yet. Release years come from the at most 25 releases MusicBrainz returns per recording.
 - Organization uses metadata only (genres, tags, artists, decade). It has no acoustic understanding yet. Categories work only as well as the library's genre and tag vocabulary; there are no synonyms ("Chill" does not match "calm").
 - Count selection is heuristic and was tuned on synthetic data. It has not yet been evaluated on real libraries or with listeners.
 - With only required categories and no count, every track must land in one of them. Tracks that fit none are flagged low-similarity instead of being left out.

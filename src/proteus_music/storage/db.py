@@ -61,6 +61,22 @@ MIGRATIONS: tuple[str, ...] = (
     ALTER TABLE organization_runs ADD COLUMN details TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE playlists ADD COLUMN origin TEXT NOT NULL DEFAULT 'discovered';
     """,
+    """
+    CREATE TABLE enrichment_lookups (
+        provider TEXT NOT NULL,
+        track_id TEXT NOT NULL REFERENCES tracks(id),
+        query TEXT NOT NULL,
+        status TEXT NOT NULL,
+        recording_id TEXT,
+        confidence REAL,
+        candidates INTEGER NOT NULL,
+        detail TEXT NOT NULL,
+        license TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        refresh_after TEXT NOT NULL,
+        PRIMARY KEY (provider, track_id)
+    );
+    """,
 )
 
 

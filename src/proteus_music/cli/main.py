@@ -9,7 +9,7 @@ from typing import Annotated
 
 import typer
 
-from proteus_music.cli import imports, render
+from proteus_music.cli import enrich, imports, render
 from proteus_music.cli.common import (
     EXIT_PARTIAL,
     MAX_LISTED_ISSUES,
@@ -29,6 +29,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(imports.app, name="import")
+app.add_typer(enrich.app, name="enrich")
 
 JsonFlag = Annotated[bool, typer.Option("--json", help="Print machine-readable JSON.")]
 
