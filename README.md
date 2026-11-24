@@ -21,12 +21,13 @@ Early development, usable from the command line and installable from source only
 - **Local web interface:** `proteus serve` covers import, organization, playlist and flagged-track inspection, and export, using the same services as the CLI. See [Web interface](#web-interface).
 - **Acoustic analysis:** CPU-only loudness, spectral, timbre (MFCC) and tempo features from permitted local audio, cached by file identity, fused with metadata. See [Acoustic analysis](#acoustic-analysis).
 - **Duplicate candidates:** Chromaprint-style fingerprints list possible duplicate recordings for review; nothing is merged automatically.
+- **Spotify (optional, your own developer app):** read-only import of saved tracks and your playlists for identification only, an export preview of matched, ambiguous and unavailable tracks, and confirmed, resumable creation of private playlists. See [Spotify](#spotify).
 - **Enrichment (optional, opt-in):** MusicBrainz lookups by ISRC or MusicBrainz recording ID, using CC0 core data only. See [Metadata enrichment](#metadata-enrichment).
 - **Exports:** M3U8 (one file per playlist, absolute or relative paths), CSV, and JSON (which can be re-imported). Tracks that cannot be exported are reported, and existing files are never overwritten unless requested.
 
 ### Planned
 
-Audio embeddings, reviewed duplicate merging, title/artist search for enrichment, additional clustering algorithms (density- and graph-based), visual exploration and manual playlist editing in the web interface, authorized streaming-service adapters (Spotify, Apple Music, YouTube), and packaged releases. Platform integrations are subject to API availability, authorization, and applicable data-use policies.
+Audio embeddings, reviewed duplicate merging, title/artist search for enrichment, additional clustering algorithms (density- and graph-based), visual exploration and manual playlist editing in the web interface, and packaged releases. Apple Music and YouTube adapters are not planned for now: their current terms block an installable open-source app (see [Spotify](#spotify) for the review).
 
 ## Install from source
 
@@ -136,7 +137,7 @@ Because no threshold separates a remaster from a copy, fingerprints never merge 
 
 ## Metadata enrichment
 
-Proteus can add independently licensed metadata from [MusicBrainz](https://musicbrainz.org). This is the only workflow that uses the network, and it is off unless you ask for it:
+Proteus can add independently licensed metadata from [MusicBrainz](https://musicbrainz.org). Like the Spotify adapter, it uses the network only when you ask:
 
 ```sh
 proteus enrich musicbrainz                       # dry run: shows what would be looked up, sends nothing
@@ -158,6 +159,59 @@ proteus organize --mode auto                     # re-organize with the enriched
 - HTTP 503 (throttling) and transient failures are retried up to 3 times with backoff; persistent throttling stops the run.
 - Every outcome is stored in SQLite with its query, confidence, license and refresh time, so an interrupted run resumes where it left off.
 - Matches are refreshed after 180 days, unmatched results after 30, and errors on the next run. `--refresh` forces new lookups.
+
+## Spotify
+
+Proteus can import from and export to Spotify through **your own** Spotify app in development mode. It ships no client ID or secret. You need:
+
+- **Spotify Premium** on the account that owns the app. Development-mode apps stop working without it.
+- **A developer app** created at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) with the Web API enabled and the redirect URI `http://127.0.0.1:8766/callback`, entered exactly. Spotify rejects `localhost`.
+- **An allowlist entry** for each account that uses the app. Development mode allows up to 5 users.
+
+```sh
+proteus spotify login --client-id YOUR_CLIENT_ID   # read-only: user-library-read, playlist-read-private
+proteus spotify import                             # saved tracks + playlists you own or collaborate on
+proteus organize --mode auto
+proteus spotify preview --search                   # matched / ambiguous / unavailable; writes nothing
+proteus spotify login --client-id YOUR_CLIENT_ID --write   # adds playlist-modify-private
+proteus spotify publish --search                   # asks for confirmation, creates private playlists
+proteus spotify disconnect                         # deletes credentials and all Spotify data locally
+```
+
+**Authorization:** the authorization code flow with PKCE, so no client secret is involved. The redirect goes to a one-shot listener on the loopback address, and its `state` is checked. Tokens and your client ID are stored in the OS keyring (macOS Keychain, Windows Credential Manager, or Secret Service on Linux), never in the database, logs or exports.
+
+**Data use:** Spotify's Developer Policy forbids analyzing Spotify content or using it to train models. Every Spotify record is therefore *identification-only*:
+- It resolves identity and enables export, but never reaches feature extraction.
+- Tracks known only from Spotify are assigned and flagged `missing-features`.
+- Playlists are organized from the metadata and audio of your other, permitted sources.
+- Displayed Spotify data is attributed to Spotify.
+
+**Matching:**
+- **Matched:** a track has a reference in your imported Spotify library.
+- **Searched (`--search`, optional):** a track with an ISRC is looked up by that ISRC. A result counts as matched only for the same version (live, remix and so on) at a compatible duration. Different versions are *ambiguous* and left out. Search results are not stored.
+- **Unavailable:** tracks with no reference and no ISRC. Titles alone are never matched.
+
+**Publishing:**
+- Creates one **private** playlist per result playlist, and only after you confirm (`--yes` confirms in advance).
+- Each playlist's description carries a marker `[proteus <result>/<index>]`. A re-run of the same result adopts the marked playlist and appends only the items it does not hold yet, so retries after a failure or a quota stop never create duplicate playlists.
+- A write whose response was lost is never retried blindly; the next run resumes from what Spotify reports.
+
+**Limits:**
+- Listings are paged 50 at a time and items are added 100 per request.
+- HTTP 429 honours `Retry-After` up to 120 s, and server errors on reads are retried up to 4 times.
+- `QUOTA_EXCEEDED`, the development-mode quota, stops the run. What was completed is kept, and a re-run continues.
+
+**Disconnect:** `proteus spotify disconnect` lists what will go and asks first. It then deletes:
+- the stored credentials;
+- every Spotify record;
+- tracks known only from Spotify, and saved results that include them;
+- canonical fields copied from Spotify, rebuilt from your other sources.
+
+Playlists already created in your Spotify account are left there.
+
+**Other providers (reviewed November 2026):**
+- **Apple Music:** needs a paid Apple Developer Program membership and a private MusicKit key to sign tokens, and a key cannot be shared in an open-source app. The license also restricts MusicKit use to facilitating access to Apple Music subscriptions and forbids caching or analyzing Apple data.
+- **YouTube:** has no official YouTube Music API. The Data API covers YouTube videos and playlists only. Its policies forbid embedding API credentials in open-source projects. Adding each track to a playlist costs 50 units of the default 10,000 per day.
 
 ## How organization works
 
@@ -220,7 +274,7 @@ In auto mode on the synthetic libraries:
 | `crates/proteus-core` | Rust extension `proteus_music._native`: parallel scanning, content-based format detection, tag extraction (PyO3, Lofty, Rayon). |
 | `src/proteus_music/models` | Normalized track, organization and quality models. |
 | `src/proteus_music/library` | Identity resolution and import service. |
-| `src/proteus_music/integrations` | Adapter contract plus local and portable-file adapters. |
+| `src/proteus_music/integrations` | Adapter contract (import, match, export) plus local, portable-file, MusicBrainz and Spotify adapters. |
 | `src/proteus_music/engine` | Features, categories, clustering, count planning, assignment, evaluation and naming. Independent of providers and interfaces. |
 | `src/proteus_music/playlists` | Organization and export services shared by all interfaces. |
 | `src/proteus_music/storage` | SQLite persistence with versioned migrations. |
@@ -231,6 +285,7 @@ In auto mode on the synthetic libraries:
 
 ## Limitations
 
+- Spotify support is tested only against a mocked Web API, not a live account. It covers the endpoints as documented after Spotify's February 2026 development-mode changes. Extended quota mode is available only to organizations, so each user needs their own app, and the web interface does not offer Spotify yet.
 - Enrichment looks up identifiers only; tracks with neither an ISRC nor a MusicBrainz ID cannot be enriched yet. Release years come from the at most 25 releases MusicBrainz returns per recording.
 - Acoustic features are conventional signal statistics, not learned embeddings, and no listening review has been done yet. Opus files cannot be decoded.
 - Organization uses metadata (genres, tags, artists, decade) plus conventional audio statistics when analyzed. Categories work only as well as the library's genre and tag vocabulary; there are no synonyms ("Chill" does not match "calm").

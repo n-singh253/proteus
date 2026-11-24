@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from proteus_music.library.identity import parse_title
@@ -26,24 +27,28 @@ def find_record(
     return (row["track_id"], TrackRecord.model_validate_json(row["record"])) if row else None
 
 
-def insert_track(conn: sqlite3.Connection, track_id: str, record: TrackRecord) -> None:
+_CANONICAL = "title, artists, album, duration_ms, year, isrc, musicbrainz_recording_id, version"
+
+
+def _canonical(record: TrackRecord) -> tuple:
     parts = parse_title(record.title)
     artists = list(dict.fromkeys([*record.artists, *parts.featured]))
+    return (
+        record.title,
+        json.dumps(artists),
+        record.album,
+        record.duration_ms,
+        record.year,
+        record.isrc,
+        record.musicbrainz_recording_id,
+        parts.version,
+    )
+
+
+def insert_track(conn: sqlite3.Connection, track_id: str, record: TrackRecord) -> None:
     conn.execute(
-        "INSERT INTO tracks (id, title, artists, album, duration_ms, year, isrc,"
-        " musicbrainz_recording_id, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            track_id,
-            record.title,
-            json.dumps(artists),
-            record.album,
-            record.duration_ms,
-            record.year,
-            record.isrc,
-            record.musicbrainz_recording_id,
-            parts.version,
-            _now(),
-        ),
+        f"INSERT INTO tracks (id, {_CANONICAL}, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (track_id, *_canonical(record), _now()),
     )
 
 
@@ -94,3 +99,59 @@ def load_tracks(conn: sqlite3.Connection) -> list[Track]:
         )
         for row in rows
     ]
+
+
+@dataclass(frozen=True)
+class SourceRemoval:
+    records: int
+    tracks_removed: int  # Tracks known only through the source.
+    tracks_rebuilt: int  # Tracks whose canonical fields are re-derived from other sources.
+    results_removed: int  # Saved results that included a removed track.
+
+
+def remove_source(conn: sqlite3.Connection, source: str, *, apply: bool) -> SourceRemoval:
+    """Delete every record from ``source`` (or, without ``apply``, only count what would go).
+
+    Canonical fields may have been copied from the source, so surviving tracks are rebuilt
+    from their remaining records; saved results that include a removed track are deleted.
+    """
+    affected = [
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT track_id FROM source_records WHERE source = ?", (source,)
+        )
+    ]
+    remaining: defaultdict[str, list[TrackRecord]] = defaultdict(list)
+    for row in conn.execute(
+        "SELECT track_id, record FROM source_records WHERE source != ? ORDER BY rowid", (source,)
+    ):
+        remaining[row["track_id"]].append(TrackRecord.model_validate_json(row["record"]))
+    orphans = [t for t in affected if not remaining.get(t)]
+    marks = ",".join("?" * len(orphans))
+    runs = [
+        row[0]
+        for row in conn.execute(
+            f"SELECT DISTINCT run_id FROM assignments WHERE track_id IN ({marks})", orphans
+        )
+    ]
+    records = conn.execute(
+        "SELECT COUNT(*) FROM source_records WHERE source = ?", (source,)
+    ).fetchone()[0]
+    summary = SourceRemoval(records, len(orphans), len(affected) - len(orphans), len(runs))
+    if not apply:
+        return summary
+    with conn:
+        conn.executemany("DELETE FROM organization_runs WHERE id = ?", [(r,) for r in runs])
+        conn.execute("DELETE FROM source_records WHERE source = ?", (source,))
+        conn.execute(f"DELETE FROM enrichment_lookups WHERE track_id IN ({marks})", orphans)
+        conn.execute(f"DELETE FROM tracks WHERE id IN ({marks})", orphans)
+        for track_id in affected:
+            if remaining.get(track_id):
+                first, *others = remaining[track_id]
+                assignments = ", ".join(f"{c.strip()} = ?" for c in _CANONICAL.split(","))
+                conn.execute(
+                    f"UPDATE tracks SET {assignments} WHERE id = ?", (*_canonical(first), track_id)
+                )
+                for record in others:
+                    fill_missing_fields(conn, track_id, record)
+    return summary

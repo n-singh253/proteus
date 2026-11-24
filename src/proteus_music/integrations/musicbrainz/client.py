@@ -9,14 +9,12 @@ from __future__ import annotations
 
 import json
 import time
-import urllib.error
-import urllib.request
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from typing import Any, Protocol
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import quote
 
 from proteus_music import __version__
+from proteus_music.integrations.http import Transport
 
 API_ROOT = "https://musicbrainz.org/ws/2/"
 RECORDING_INCLUDES = "artist-credits+isrcs+releases"
@@ -24,31 +22,6 @@ MIN_INTERVAL_S = 1.0
 TIMEOUT_S = 15.0
 BACKOFF_S = (2.0, 4.0, 8.0)  # One entry per retry; bounds retries at three.
 _RETRYABLE = {429, 500, 502, 503, 504}
-
-
-@dataclass(frozen=True)
-class HttpResponse:
-    status: int
-    body: bytes
-    retry_after: float | None = None
-
-
-class Transport(Protocol):
-    def get(self, url: str, headers: Mapping[str, str], timeout: float) -> HttpResponse: ...
-
-
-class UrllibTransport:
-    """Standard-library HTTPS transport; connection failures raise OSError."""
-
-    def get(self, url: str, headers: Mapping[str, str], timeout: float) -> HttpResponse:
-        request = urllib.request.Request(url, headers=dict(headers))
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                return HttpResponse(response.status, response.read())
-        except urllib.error.HTTPError as error:
-            retry_after = error.headers.get("Retry-After")
-            seconds = float(retry_after) if retry_after and retry_after.isdigit() else None
-            return HttpResponse(error.code, error.read(), seconds)
 
 
 class RateLimitedError(RuntimeError):
@@ -104,7 +77,7 @@ class MusicBrainzClient:
             self._wait()
             self.requests += 1
             try:
-                response = self.transport.get(API_ROOT + path, headers, TIMEOUT_S)
+                response = self.transport.request("GET", API_ROOT + path, headers, None, TIMEOUT_S)
             except OSError as error:
                 response, reason = None, f"network error: {error}"
             else:

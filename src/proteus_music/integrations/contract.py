@@ -10,6 +10,7 @@ from proteus_music.models.track import TrackRecord
 
 class Capability(StrEnum):
     IMPORT = "import"
+    MATCH = "match"  # Resolve canonical tracks to destination references for a preview.
     EXPORT = "export"
 
 
@@ -55,3 +56,41 @@ class ExportReport:
     @property
     def complete(self) -> bool:
         return not self.unexportable
+
+
+class MatchStatus(StrEnum):
+    MATCHED = "matched"
+    AMBIGUOUS = "ambiguous"  # Candidates exist but none is safely the same recording.
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class TrackMatch:
+    track_id: str
+    status: MatchStatus
+    reference: str | None  # Destination reference (e.g. a URI) when matched.
+    reason: str
+
+
+@dataclass(frozen=True)
+class PlaylistPreview:
+    index: int
+    name: str
+    description: str
+    matches: tuple[TrackMatch, ...]
+
+    @property
+    def references(self) -> tuple[str, ...]:
+        return tuple(m.reference for m in self.matches if m.reference)
+
+
+@dataclass(frozen=True)
+class ExportPreview:
+    """What a destination export would contain; nothing has been written."""
+
+    destination: str
+    result_id: str
+    playlists: tuple[PlaylistPreview, ...]
+
+    def count(self, status: MatchStatus) -> int:
+        return sum(m.status is status for p in self.playlists for m in p.matches)

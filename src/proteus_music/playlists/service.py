@@ -14,6 +14,7 @@ from proteus_music.engine.pipeline import PlaylistPlan, plan_playlists
 from proteus_music.integrations.contract import AdapterInfo, ExportOptions, ExportReport
 from proteus_music.integrations.files import csv_format, json_format, m3u
 from proteus_music.integrations.local import scanner
+from proteus_music.integrations.spotify import importer as spotify
 from proteus_music.library.audio import load_acoustic, permitted_audio
 from proteus_music.models.organization import FeatureSet, OrganizationConfig, OrganizationResult
 from proteus_music.storage import results as result_store
@@ -31,6 +32,7 @@ ADAPTERS: tuple[AdapterInfo, ...] = (
     csv_format.ADAPTER,
     json_format.ADAPTER,
     m3u.ADAPTER,
+    spotify.ADAPTER,
 )
 
 

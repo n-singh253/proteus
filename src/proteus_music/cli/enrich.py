@@ -8,11 +8,8 @@ from typing import Annotated
 import typer
 
 from proteus_music.cli.common import EXIT_ERROR, EXIT_PARTIAL, console, database, handled_errors
-from proteus_music.integrations.musicbrainz.client import (
-    MIN_INTERVAL_S,
-    MusicBrainzClient,
-    UrllibTransport,
-)
+from proteus_music.integrations.http import UrllibTransport
+from proteus_music.integrations.musicbrainz.client import MIN_INTERVAL_S, MusicBrainzClient
 from proteus_music.library.enrichment import enrich, plan_enrichment
 
 app = typer.Typer(help="Enrich tracks from independent metadata sources.", no_args_is_help=True)

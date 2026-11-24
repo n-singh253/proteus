@@ -8,7 +8,8 @@ from typer.testing import CliRunner
 from proteus_music.cli.main import app
 from proteus_music.engine.features.metadata import describe
 from proteus_music.integrations.contract import ImportBatch
-from proteus_music.integrations.musicbrainz.client import HttpResponse, MusicBrainzClient
+from proteus_music.integrations.http import HttpResponse
+from proteus_music.integrations.musicbrainz.client import MusicBrainzClient
 from proteus_music.library.enrichment import enrich, plan_enrichment
 from proteus_music.library.service import import_batch
 from proteus_music.models.track import TrackRecord
@@ -36,7 +37,7 @@ class FakeTransport:
     def __init__(self, throttled=("LIMIT",)):
         self.urls, self.throttled = [], set(throttled)
 
-    def get(self, url, headers, timeout):
+    def request(self, method, url, headers, body, timeout):
         assert headers["User-Agent"].startswith("proteus-music/")
         self.urls.append(url)
         isrc = url.split("isrc/")[1].split("?")[0]

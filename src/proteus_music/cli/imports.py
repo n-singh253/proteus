@@ -26,7 +26,7 @@ IdentificationOnly = Annotated[
 ]
 
 
-def _store(ctx: typer.Context, batch: ImportBatch) -> None:
+def store_batch(ctx: typer.Context, batch: ImportBatch) -> None:
     summary = import_batch(database(ctx), batch)
     console.print(
         f"[bold]{summary.source}[/]: read {summary.records_read} record(s) — "
@@ -51,7 +51,9 @@ def import_local(
 ) -> None:
     """Scan a directory of audio files and read their embedded metadata."""
     with handled_errors():
-        _store(ctx, scanner.read_directory(directory, recursive=recursive, max_threads=threads))
+        store_batch(
+            ctx, scanner.read_directory(directory, recursive=recursive, max_threads=threads)
+        )
 
 
 @app.command("csv")
@@ -81,7 +83,7 @@ def import_csv(
             encoding=encoding,
             analysis_permitted=not identification_only,
         )
-        _store(ctx, batch)
+        store_batch(ctx, batch)
 
 
 @app.command("json")
@@ -90,7 +92,7 @@ def import_json(
 ) -> None:
     """Import a JSON track list or a Proteus JSON export."""
     with handled_errors():
-        _store(ctx, json_format.read_json(path, analysis_permitted=not identification_only))
+        store_batch(ctx, json_format.read_json(path, analysis_permitted=not identification_only))
 
 
 @app.command("m3u")
@@ -99,4 +101,4 @@ def import_m3u(
 ) -> None:
     """Import an M3U/M3U8 playlist, reading tags from referenced local files."""
     with handled_errors():
-        _store(ctx, m3u.read_m3u(path, analysis_permitted=not identification_only))
+        store_batch(ctx, m3u.read_m3u(path, analysis_permitted=not identification_only))
