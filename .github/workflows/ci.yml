@@ -26,8 +26,10 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
       - run: npm --prefix frontend ci
       - run: npm --prefix frontend run build
+      - run: python3 tools/third_party_licenses.py --check
 
   python:
     strategy:

@@ -1,10 +1,11 @@
 """Autonomous-mode quality on synthetic libraries with known structure.
 
-Usage: uv run python benchmarks/quality.py [--seeds 3]
+Usage: uv run python benchmarks/quality.py [--seeds 3] [--algorithm NAME] [--exact]
 
-Reports the chosen playlist count and agreement with the generating groups (adjusted Rand
-index). Matching the generating count is evidence, not proof, of a good choice: ambiguous
-scenarios have several defensible answers.
+With --exact, each scenario is organized into its generating number of groups instead, which
+isolates clustering quality from count selection. Reports the chosen playlist count, agreement
+with the generating groups (adjusted Rand index) and playlist sizes. Matching the generating
+count is evidence, not proof, of a good choice: ambiguous scenarios have several defensible answers.
 """
 
 from __future__ import annotations
@@ -12,11 +13,14 @@ from __future__ import annotations
 import argparse
 import time
 
+import graph_clustering
 from sklearn.metrics import adjusted_rand_score
 from synthetic import make_library, structureless
 
 from proteus_music.engine.pipeline import plan_playlists
 from proteus_music.models.organization import OrganizationConfig, OrganizationMode
+
+graph_clustering.register()  # Experimental: --algorithm knn-graph.
 
 SCENARIOS = {
     "clear 4x250": lambda s: make_library([250] * 4, seed=s),
@@ -36,15 +40,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seeds", type=int, default=3)
     parser.add_argument("--algorithm", default="kmeans-merge")
+    parser.add_argument("--exact", action="store_true", help="Use the generating group count.")
     args = parser.parse_args()
     config = OrganizationConfig(mode=OrganizationMode.AUTO, algorithm=args.algorithm)
-    print(f"{'scenario':32} {'groups':>6} {'chosen':>12} {'ARI':>12} {'seconds':>8}")
+    print(f"{'scenario':32} {'groups':>6} {'chosen':>12} {'ARI':>12} {'sizes':>9} {'seconds':>8}")
     for name, build in SCENARIOS.items():
         chosen, agreement, elapsed, groups = [], [], 0.0, "-"
         for seed in range(args.seeds):
             descriptors, truth = build(seed)
+            update: dict = {"seed": seed}
+            if args.exact:
+                update |= {"mode": OrganizationMode.GUIDED, "playlists": len(set(truth or [0]))}
             start = time.perf_counter()
-            plan = plan_playlists(descriptors, config.model_copy(update={"seed": seed}))
+            plan = plan_playlists(descriptors, config.model_copy(update=update))
             elapsed += time.perf_counter() - start
             labels = {t: p.index for p in plan.playlists for t in p.track_ids}
             chosen.append(len(plan.playlists))
@@ -52,9 +60,11 @@ def main() -> None:
                 groups = str(len(set(truth)))
                 predicted = [labels[d.track_id] for d in descriptors]
                 agreement.append(adjusted_rand_score(truth, predicted))
+            sizes = f"{plan.quality.smallest_playlist}..{plan.quality.largest_playlist}"
         ari = " ".join(f"{a:.2f}" for a in agreement) or "-"
         counts = " ".join(map(str, chosen))
-        print(f"{name:32} {groups:>6} {counts:>12} {ari:>12} {elapsed / args.seeds:>8.2f}")
+        seconds = elapsed / args.seeds
+        print(f"{name:32} {groups:>6} {counts:>12} {ari:>12} {sizes:>9} {seconds:>8.2f}")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ Proteus is an open-source, local-first music organization engine designed to tra
 
 ## Status
 
-Early development, usable from the command line and installable from source only. Proteus imports a collection, resolves track identity, and represents each track from its metadata. It then organizes every track into exactly one playlist, in user-guided or autonomous mode, and exports the result.
+Early development: a command line and a local web interface, installable from source or from a release-candidate wheel (not yet published). Proteus imports a collection, resolves track identity, and represents each track from its metadata. It then organizes every track into exactly one playlist, in user-guided or autonomous mode, and exports the result.
 
 ### Implemented
 
@@ -27,16 +27,46 @@ Early development, usable from the command line and installable from source only
 
 ### Planned
 
-Audio embeddings, reviewed duplicate merging, title/artist search for enrichment, additional clustering algorithms (density- and graph-based), visual exploration and manual playlist editing in the web interface, and packaged releases. Apple Music and YouTube adapters are not planned for now: their current terms block an installable open-source app (see [Spotify](#spotify) for the review).
+Audio embeddings, reviewed duplicate merging, title/artist search for enrichment, density-based clustering (graph-based clustering was evaluated and not adopted; see Benchmarks), visual exploration and manual playlist editing in the web interface, and published releases. Apple Music and YouTube adapters are not planned for now: their current terms block an installable open-source app (see [Spotify](#spotify) for the review).
 
-## Install from source
+## Install
 
-Requires Python 3.11+, a Rust toolchain, and [uv](https://docs.astral.sh/uv/).
+### From a release-candidate wheel
+
+Wheels bundle the compiled Rust extension and the built web interface, so neither Rust nor Node.js is needed. One wheel per platform covers CPython 3.11 and newer (abi3). Proteus is not yet on PyPI; the package name `proteus-music` was unclaimed when checked in November 2026.
 
 ```sh
-uv sync          # builds the Rust extension and installs dependencies into .venv
+python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install proteus_music-0.1.0-cp311-abi3-<platform>.whl
+proteus --help
+```
+
+| Platform | Wheel | Clean-install check (import, analyze, organize, report, export, serve) |
+| --- | --- | --- |
+| macOS arm64 | built locally | passed locally with Python 3.11 and 3.14; also from the sdist with 3.12 |
+| macOS x86_64 | cross-built by the release workflow | not smoke-tested |
+| Linux x86_64 / aarch64 (manylinux) | built by the release workflow | smoke-tested by the release workflow with Python 3.11 and 3.14 (not yet run) |
+| Windows x64 | built by the release workflow | smoke-tested by the release workflow with Python 3.11 and 3.14 (not yet run) |
+
+### From source
+
+Requires Python 3.11+, a Rust toolchain, Node.js 22+ (for the web interface) and [uv](https://docs.astral.sh/uv/).
+
+```sh
+uv sync                                                        # builds the Rust extension
+npm --prefix frontend ci && npm --prefix frontend run build    # optional: web interface
 uv run proteus --help
 ```
+
+### Supported integrations
+
+| Integration | Import | Match | Export | Notes |
+| --- | --- | --- | --- | --- |
+| Local audio files | yes | | M3U8 | MP3, FLAC, WAV, AAC/M4A, ALAC, Ogg Vorbis analyzed; Opus imported but not decoded |
+| CSV, JSON, M3U/M3U8 | yes | | yes | JSON exports re-import with restrictions intact |
+| MusicBrainz | enrichment | by ISRC / MBID | | opt-in network use, CC0 core data only |
+| Spotify | yes (identification only) | yes | private playlists | your own development-mode app and Spotify Premium |
+| Apple Music, YouTube | no | no | no | blocked by current terms (see [Spotify](#spotify)) |
 
 ## Usage
 
@@ -246,6 +276,7 @@ These constants were set empirically on the synthetic libraries in `benchmarks/q
 
 ```sh
 uv run python benchmarks/quality.py                      # auto mode vs known synthetic groups
+uv run python benchmarks/stability.py                    # agreement across seeds and subsamples
 uv run python benchmarks/performance.py --sizes 1000 10000 50000 100000
 ```
 
@@ -267,6 +298,33 @@ In auto mode on the synthetic libraries:
 - Structureless and tiny (12-track) libraries get a single playlist.
 - At 60% metadata noise the generating groups are barely present, and the chosen count (8–9) is not reliable.
 
+### Research: sparse nearest-neighbour graph clustering (not adopted)
+
+`benchmarks/graph_clustering.py` is an experimental clusterer, `knn-graph`, that runs only inside the benchmarks:
+- It links each track to its 15 most cosine-similar tracks, using a 64-dimension SVD for the search.
+- It embeds that sparse graph spectrally and uses the cluster means as prototypes, so assignment and every constraint are unchanged.
+- It adds no dependency.
+
+Run the comparison with `quality.py [--exact]`, `stability.py`, `acoustic.py --encode` and `performance.py`, each with `--algorithm knn-graph`. The control is the default `kmeans-merge`.
+
+Results on fixed synthetic fixtures (ARI = adjusted Rand index against the generating groups):
+
+| Measure | kmeans-merge | knn-graph |
+| --- | --- | --- |
+| Exact count, clear, noisy, hierarchical and missing-data scenarios | 0.62–0.97 | same, ±0.02 |
+| Exact count, imbalanced 600/200/80/40/20 | 0.86 (sizes 47–561) | **0.50** (73–290: splits the large group) |
+| Synthetic audio collection, 400 tracks, fused, exact 4 / auto | 0.80–0.86 / 0.65–0.86 | **0.90 / 0.90** |
+| Same collection, audio only, exact 4 | 0.71 | 0.29–0.71 (unstable) |
+| Zipf 20 groups, exact 20, at 10k / 50k tracks | 0.91 / 0.90 | 0.74 / **0.31** |
+| Seed stability (pairwise ARI), ambiguous 60% noise, auto | 0.72 | 0.99 |
+| 80% subsample stability, imbalanced, exact | 0.99 | **0.61** |
+| Time / peak RAM, 50k tracks, fixed 15 | 1.2 s / 0.44 GB | 3.7 s / 0.61 GB |
+| Time / peak RAM, 100k tracks, auto | 5.2 s / 0.88 GB | 10.8 s / 1.2 GB |
+
+The graph splits into separate pieces as libraries grow: 1 connected component at 1k tracks, 4 at 10k and 17 at 50k. The spectral embedding then spends its eigenvectors separating those pieces rather than musical groups, which explains the 50k collapse. ARPACK fared no better (0.12 at 50k) and peaked at 1.7 GB, so above 10k tracks the experiment uses LOBPCG.
+
+It helped only on the small fused audio collection and on seed stability in noisy data, while losing on imbalanced libraries, large libraries, subsample stability, runtime and memory. It therefore stays an experiment, and `kmeans-merge` remains the default. No listening review was possible: the fixtures are synthetic.
+
 ## Architecture
 
 | Path | Responsibility |
@@ -281,7 +339,8 @@ In auto mode on the synthetic libraries:
 | `src/proteus_music/cli` | Thin Typer CLI. |
 | `src/proteus_music/api` | FastAPI app for `proteus serve`: local-only protections, jobs, typed views. |
 | `frontend/` | React/TypeScript interface, built into `src/proteus_music/api/static/` (not committed). |
-| `benchmarks/` | Synthetic-library quality and performance benchmarks (not part of the package). |
+| `benchmarks/` | Synthetic-library quality, stability and performance benchmarks, and the experimental `knn-graph` clusterer (not part of the package). |
+| `tools/` | Release tooling: third-party license notices and the installed-package smoke test. |
 
 ## Limitations
 
@@ -303,6 +362,22 @@ npm --prefix frontend ci && npm --prefix frontend run build   # strict type chec
 ```
 
 After changing Rust code, `uv sync` rebuilds the extension. Tests use small synthetic fixtures only. Never commit music, databases, credentials or model weights.
+
+After changing `Cargo.lock` or `frontend/package-lock.json`, regenerate the notices for code bundled into wheels with `python tools/third_party_licenses.py`; CI fails when they are stale.
+
+**Release candidates:** push a `release/*` branch or a `v*` tag, or run the *Release candidate* workflow manually. The workflow:
+- builds the web interface;
+- builds wheels for Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows (x64), plus an sdist;
+- installs each wheel into a clean environment on Linux, macOS and Windows with Python 3.11 and 3.14, and runs `tools/release_smoke.py`.
+
+It publishes nothing. To test a wheel locally, build it with `npm --prefix frontend run build && uv run maturin build --release`, then run `tools/release_smoke.py` with the interpreter of a clean environment where that wheel is installed.
+
+**Licenses:** Proteus is Apache-2.0. Wheels also contain:
+- Rust crates under MIT, Apache-2.0, BSD-style, Zlib and Unicode licenses;
+- Symphonia under MPL-2.0, used unmodified;
+- React under MIT.
+
+All of these are listed with their license texts in `THIRD_PARTY_LICENSES.txt`. Runtime Python dependencies are installed separately and are permissive (MIT, BSD, Apache-2.0, ISC, PSF). No models or datasets are bundled, and every test and benchmark fixture is generated synthetically.
 
 ## License
 

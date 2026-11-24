@@ -1,6 +1,7 @@
 """Metadata-only vs audio-only vs fused organization on a synthetic audio collection.
 
 Usage: uv run python benchmarks/acoustic.py [--per-style 30] [--seconds 20] [--encode]
+       [--algorithm NAME]
 
 Generates four synthetic musical styles (WAV, or AAC/FLAC via macOS ``afconvert`` with
 --encode), imports them through CSV with deliberately imperfect metadata, analyzes the audio
@@ -19,6 +20,7 @@ import time
 import wave
 from pathlib import Path
 
+import graph_clustering
 import numpy as np
 from sklearn.metrics import adjusted_rand_score
 
@@ -29,6 +31,8 @@ from proteus_music.models.organization import FeatureSet, OrganizationConfig, Or
 from proteus_music.playlists.service import organize_library
 from proteus_music.storage.db import connect
 from proteus_music.storage.tracks import load_tracks
+
+graph_clustering.register()  # Experimental: --algorithm knn-graph.
 
 SR = 22050
 STYLES = ("Ambient", "Drum and Bass", "Folk", "Techno")
@@ -119,6 +123,7 @@ def main() -> None:
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--seeds", type=int, default=3)
     parser.add_argument("--encode", action="store_true", help="Mix in AAC and FLAC (macOS).")
+    parser.add_argument("--algorithm", default="kmeans-merge")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -136,7 +141,13 @@ def main() -> None:
         ):
             for features in FeatureSet:
                 runs = [
-                    evaluate(conn, truth, OrganizationConfig(features=features, seed=s, **extra))
+                    evaluate(
+                        conn,
+                        truth,
+                        OrganizationConfig(
+                            features=features, seed=s, algorithm=args.algorithm, **extra
+                        ),
+                    )
                     for s in range(args.seeds)
                 ]
                 aris = " ".join(f"{r[0]:.2f}" for r in runs)

@@ -1,0 +1,109 @@
+# Builds release candidates (wheels with the Rust extension and web interface bundled, plus an
+# sdist) and smoke-tests clean installs on Linux, macOS and Windows. It never publishes:
+# artifacts are left on the run for maintainer review.
+name: Release candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["release/**"]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run build
+      - name: Third-party license file is current
+        run: python3 tools/third_party_licenses.py --check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: src/proteus_music/api/static/
+
+  wheels:
+    needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64 }
+          - { os: ubuntu-24.04-arm, target: aarch64 }
+          - { os: macos-latest, target: aarch64 }
+          - { os: macos-latest, target: x86_64 }
+          - { os: windows-latest, target: x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: src/proteus_music/api/static/
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --locked --out dist
+          manylinux: auto
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.target }}
+          path: dist/*.whl
+
+  sdist:
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: src/proteus_music/api/static/
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  smoke:
+    needs: wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        python: ["3.11", "3.14"]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: wheels
+          merge-multiple: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Clean install from the built wheel
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          venv_python="$RUNNER_TEMP/venv/bin/python"
+          [ -x "$venv_python" ] || venv_python="$RUNNER_TEMP/venv/Scripts/python.exe"
+          "$venv_python" -m pip install --find-links wheels --only-binary proteus-music proteus-music
+          echo "VENV_PYTHON=$venv_python" >> "$GITHUB_ENV"
+      - name: Import, analyze, organize, report, export and serve
+        working-directory: ${{ runner.temp }}
+        run: '"$VENV_PYTHON" "$GITHUB_WORKSPACE/tools/release_smoke.py"'

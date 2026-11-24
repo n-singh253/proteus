@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Local-first music organization engine that turns large libraries into cohesive, non-overlapping playlists."
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.txt"]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.165.0",
@@ -37,6 +38,8 @@ manifest-path = "crates/proteus-core/Cargo.toml"
 module-name = "proteus_music._native"
 python-source = "src"
 features = ["pyo3/extension-module"]
+# The built web interface is gitignored, so it must be included explicitly.
+include = [{ path = "src/proteus_music/api/static/**/*", format = ["sdist", "wheel"] }]
 
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "crates/**/*.rs" }]

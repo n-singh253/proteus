@@ -16,10 +16,13 @@ import subprocess
 import sys
 import time
 
+import graph_clustering
 from synthetic import make_library
 
 from proteus_music.engine.pipeline import plan_playlists
 from proteus_music.models.organization import Category, OrganizationConfig, OrganizationMode
+
+graph_clustering.register()  # Experimental: --algorithm knn-graph.
 
 GROUPS = 20
 CATEGORY_NAMES = [f"genre {g}-0" for g in range(5)]
