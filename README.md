@@ -12,7 +12,7 @@ Early development, usable from the command line and installable from source only
 
 - **Imports:** local audio directories (MP3, FLAC, WAV, AAC, M4A, Ogg Vorbis, Opus, detected by file content rather than extension), CSV with configurable column mapping, JSON, and M3U/M3U8. Imports never modify source files.
 - **Identity:** records merge only on a shared ISRC, a shared MusicBrainz recording ID, or an exact normalized title/artist/version match with compatible durations. Live, remix, remaster and other versions stay separate, even when an identifier claims otherwise. Such conflicts are reported at import.
-- **Provenance:** every source record keeps its own metadata. Sources imported with `--identification-only` are used for identity and export but never for analysis. CSV and JSON exports carry an `analysis_permitted` flag that re-import honors. A track is exported as analyzable only if every one of its sources permits analysis. M3U exports omit `#EXTINF` metadata for restricted tracks.
+- **Provenance:** every source record keeps its own metadata. Sources imported with `--identification-only` are used for identity and export but never for analysis, and re-importing the same source later cannot lift that restriction. CSV and JSON exports carry an `analysis_permitted` flag that re-import honors. A track is exported as analyzable only if every one of its sources permits analysis. M3U exports omit `#EXTINF` metadata for restricted tracks.
 - **Organization:**
   - Modes: an exact playlist count, a count range, required categories, preferred categories, any combination of these, and fully autonomous mode.
   - Optional minimum and maximum playlist sizes.

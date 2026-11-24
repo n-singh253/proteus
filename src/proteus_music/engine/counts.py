@@ -34,6 +34,10 @@ class Run:
     def n_fixed(self) -> int:
         return len(self.categories.categories)
 
+    @property
+    def n_required(self) -> int:
+        return self.categories.n_required
+
 
 @dataclass(frozen=True)
 class CountRange:
@@ -68,15 +72,15 @@ def count_range(run: Run, low: int, high: int) -> CountRange:
         cap = selection.auto_upper_bound(
             run.features.matrix[run.features.core], run.features.columns, useful
         )
-        high = max(low, min(high, max(cap, run.n_fixed)))
-    low = max(low, run.n_fixed)
+        high = max(low, min(high, max(cap, run.n_required)))
+    low = max(low, run.n_required)  # Preferred categories never raise the minimum.
     missing = n - n_analyzable
     fits = missing >= config.min_size and (config.max_size is None or missing <= config.max_size)
     if missing and fits:
         if n_analyzable == 0 and low <= 1:
             return CountRange(0, 0, True)
         by_size = -(-n_analyzable // config.max_size) if config.max_size else 1
-        k_low = max(low - 1, run.n_fixed, 1, by_size)
+        k_low = max(low - 1, run.n_required, 1, by_size)
         k_high = min(high - 1, n_analyzable // config.min_size)
         if n_analyzable and k_low <= k_high:
             return CountRange(k_low, k_high, True)
@@ -107,8 +111,9 @@ def select_count(run: Run, counts: CountRange) -> CountSelection:
     extra = int(counts.unclassified)
 
     def evaluate_count(k: int) -> CountCandidate:
+        categories = run.categories.for_count(k)
         prototypes = build_prototypes(
-            x, run.categories.prototypes, k - run.n_fixed, run.clusterer, config.seed
+            x, categories.prototypes, k - len(categories.categories), run.clusterer, config.seed
         )
         scores = similarity_scores(x, prototypes, k)
         labels = assign(scores, min(min_s, s // k), max_s)
@@ -133,7 +138,7 @@ def select_count(run: Run, counts: CountRange) -> CountSelection:
             low_confidence_rate=report.low_confidence_rate,
         )
 
-    single = counts.low == 1 and run.n_fixed == 0
+    single = counts.low == 1 and run.n_required == 0
     start = max(counts.low, 2) if single else counts.low
     evaluated = []
     if start <= counts.high:

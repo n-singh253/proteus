@@ -1,3 +1,5 @@
+import pytest
+
 from proteus_music.library.identity import IdentityIndex, parse_title
 from proteus_music.models.track import TrackRecord
 
@@ -30,3 +32,32 @@ def test_reliable_identifiers_and_exact_metadata_merge():
 def test_parse_title_extracts_featured_artists_and_version():
     parts = parse_title("Track (feat. A & B) [Radio Edit]")
     assert (parts.base, parts.version, parts.featured) == ("Track", "radio edit", ("A", "B"))
+
+
+@pytest.mark.parametrize("order", [("studio", "live"), ("live", "studio")])
+def test_shared_isrc_attaches_to_the_matching_version(order):
+    titles = {"studio": "Song", "live": "Song (Live)"}
+    index, ids = IdentityIndex(), {}
+    for name in order:
+        candidate = record(name, titles[name], isrc="USAAA0000001")
+        ids[name] = index.resolve(candidate) or name
+        index.add(ids[name], candidate)
+
+    assert ids == {"studio": "studio", "live": "live"}  # Shared ISRC, distinct recordings.
+    assert index.resolve(record("x", "Song (Live)", isrc="USAAA0000001")) == "live"
+    assert index.resolve(record("y", "Song", isrc="USAAA0000001")) == "studio"
+
+
+def test_ambiguous_identifiers_stay_separate():
+    index = IdentityIndex()
+    index.add("by-isrc", record("a", "Song", isrc="USAAA0000001"))
+    index.add("by-mbid", record("b", "Song", musicbrainz_recording_id="mbid-1"))
+    assert (
+        index.resolve(record("c", "Song", isrc="USAAA0000001", musicbrainz_recording_id="mbid-1"))
+        is None
+    )
+    assert "different tracks" in index.conflicts[-1]
+
+    index.add("duplicate", record("d", "Song", isrc="USAAA0000001"))  # Same ISRC and version.
+    assert index.resolve(record("e", "Song", isrc="USAAA0000001")) is None
+    assert "shared by 2 track(s)" in index.conflicts[-1]

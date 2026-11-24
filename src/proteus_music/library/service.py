@@ -33,13 +33,21 @@ class LibraryStats:
 
 
 def import_batch(conn: sqlite3.Connection, batch: ImportBatch) -> ImportSummary:
-    """Resolve records to canonical tracks and persist them in one transaction."""
+    """Resolve records to canonical tracks and persist them in one transaction.
+
+    Refreshing an existing source reference never lifts an analysis restriction on it;
+    other source references of the same track keep their own permissions.
+    """
     index = IdentityIndex.from_tracks(track_store.load_tracks(conn))
     new = matched = refreshed = 0
     with conn:
         for record in batch.records:
-            track_id = track_store.record_track_id(conn, record.source, record.source_key)
-            if track_id is not None:
+            existing = track_store.find_record(conn, record.source, record.source_key)
+            if existing is not None:
+                track_id, stored = existing
+                # A restriction is sticky: re-importing the same reference cannot lift it.
+                if not stored.analysis_permitted:
+                    record = record.model_copy(update={"analysis_permitted": False})
                 refreshed += 1
             else:
                 track_id = index.resolve(record)

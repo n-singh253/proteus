@@ -15,12 +15,15 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def record_track_id(conn: sqlite3.Connection, source: str, source_key: str) -> str | None:
+def find_record(
+    conn: sqlite3.Connection, source: str, source_key: str
+) -> tuple[str, TrackRecord] | None:
+    """The canonical track ID and stored record for a source reference, if imported before."""
     row = conn.execute(
-        "SELECT track_id FROM source_records WHERE source = ? AND source_key = ?",
+        "SELECT track_id, record FROM source_records WHERE source = ? AND source_key = ?",
         (source, source_key),
     ).fetchone()
-    return row["track_id"] if row else None
+    return (row["track_id"], TrackRecord.model_validate_json(row["record"])) if row else None
 
 
 def insert_track(conn: sqlite3.Connection, track_id: str, record: TrackRecord) -> None:

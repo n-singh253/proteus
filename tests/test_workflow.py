@@ -11,8 +11,10 @@ from typer.testing import CliRunner
 
 from proteus_music.cli.main import app
 from proteus_music.engine.evaluation.validation import validate_result
+from proteus_music.engine.features.metadata import describe
 from proteus_music.playlists.service import get_result
 from proteus_music.storage.db import connect
+from proteus_music.storage.tracks import load_tracks
 
 runner = CliRunner()
 GENRES = {"Deep House": "dance;night", "Hip-Hop": "rap;energetic", "Classical": "orchestral;calm"}
@@ -117,3 +119,22 @@ def test_infeasible_request_exits_with_reasons(tmp_path: Path):
 
     assert result.exit_code == 2
     assert "need 50 tracks" in result.output
+
+
+def test_refresh_never_lifts_a_restriction(tmp_path: Path):
+    db = tmp_path / "lib.db"
+    restricted = tmp_path / "provider.json"
+    restricted.write_text(
+        json.dumps([{"id": "p1", "title": "Song", "artists": ["A"], "genres": ["Jazz"]}])
+    )
+    own = tmp_path / "own.csv"
+    own.write_text("title,artist,genres\nSong,A,Rock\n")
+
+    invoke(db, "import", "json", str(restricted), "--identification-only")
+    assert "1 refreshed" in invoke(db, "import", "json", str(restricted)).output
+    assert "identification-only (excluded from analysis): 1" in invoke(db, "library").output
+
+    invoke(db, "import", "csv", str(own))  # Independently permitted record of the same track.
+    (track,) = load_tracks(connect(db))
+    assert len(track.records) == 2
+    assert describe(track).genres == ("Rock",)  # Only the permitted record contributes.

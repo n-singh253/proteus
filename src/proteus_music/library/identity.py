@@ -100,8 +100,8 @@ class IdentityIndex:
     """In-memory lookup from identifying signals to canonical track IDs."""
 
     def __init__(self) -> None:
-        self._by_isrc: dict[str, _Entry] = {}
-        self._by_mbid: dict[str, _Entry] = {}
+        self._by_isrc: defaultdict[str, list[_Entry]] = defaultdict(list)
+        self._by_mbid: defaultdict[str, list[_Entry]] = defaultdict(list)
         self._by_key: defaultdict[tuple[str, str, str], list[_Entry]] = defaultdict(list)
         self.conflicts: list[str] = []
 
@@ -113,24 +113,44 @@ class IdentityIndex:
                 index.add(track.id, record)
         return index
 
-    def resolve(self, record: TrackRecord) -> str | None:
-        """Matching canonical track ID, or None (identifier/version conflicts never merge)."""
-        version = _version(record)
+    def _identifier_match(self, record: TrackRecord) -> tuple[bool, str | None]:
+        """(identifiers present in the index, the one track they agree on or None).
+
+        Several tracks may share an identifier (a live version carrying the studio ISRC);
+        the record attaches only to a track with its own version. Every shared identifier
+        must point to the same single track, otherwise the match is ambiguous.
+        """
+        version, matches, problems = _version(record), set(), []
         for label, value, table in (
             ("ISRC", record.isrc, self._by_isrc),
             ("MusicBrainz ID", record.musicbrainz_recording_id, self._by_mbid),
         ):
-            entry = table.get(value) if value else None
-            if entry is None:
+            entries = table.get(value, []) if value else []
+            if not entries:
                 continue
-            if entry.version == version:
-                return entry.track_id
+            same_version = {e.track_id for e in entries if e.version == version}
+            if len(same_version) != 1:
+                versions = sorted({e.version or "original" for e in entries})
+                problems.append(
+                    f"{label} {value} is shared by {len({e.track_id for e in entries})} track(s) "
+                    f"with version(s) {', '.join(versions)}"
+                )
+            matches |= same_version
+        if not problems and len(matches) > 1:
+            problems.append("its ISRC and MusicBrainz ID point to different tracks")
+        if problems or len(matches) > 1:
             self.conflicts.append(
-                f"'{record.title}' shares {label} {value} with track {entry.track_id} but has "
-                f"version '{version or 'original'}' vs '{entry.version or 'original'}'; "
-                "kept separate"
+                f"'{record.title}' (version '{version or 'original'}') kept separate: "
+                + "; ".join(problems)
             )
-            return None
+            return True, None
+        return bool(matches), next(iter(matches), None)
+
+    def resolve(self, record: TrackRecord) -> str | None:
+        """Matching canonical track ID, or None for new or ambiguous recordings."""
+        indexed, track_id = self._identifier_match(record)
+        if indexed:
+            return track_id
         for entry in self._by_key.get(identity_key(record), ()):
             if _compatible(entry, record):
                 return entry.track_id
@@ -142,7 +162,7 @@ class IdentityIndex:
             track_id, record.isrc, record.musicbrainz_recording_id, record.duration_ms, key[2]
         )
         if record.isrc:
-            self._by_isrc.setdefault(record.isrc, entry)
+            self._by_isrc[record.isrc].append(entry)
         if record.musicbrainz_recording_id:
-            self._by_mbid.setdefault(record.musicbrainz_recording_id, entry)
+            self._by_mbid[record.musicbrainz_recording_id].append(entry)
         self._by_key[key].append(entry)

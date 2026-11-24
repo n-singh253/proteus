@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -194,12 +194,13 @@ def plan_playlists(
         k = chosen.chosen - int(counts.unclassified)
         timings["selection"] = clock() - start
 
+    run = replace(run, categories=resolved.for_count(k))
     start = clock()
     analyzable = features.matrix[features.core]
     prototypes = np.zeros((0, features.matrix.shape[1]))
     if k and analyzable.shape[0] and analyzable.shape[1]:
         prototypes = build_prototypes(
-            analyzable, resolved.prototypes, k - run.n_fixed, clusterer, config.seed
+            analyzable, run.categories.prototypes, k - run.n_fixed, clusterer, config.seed
         )
     timings["clustering"] = clock() - start
 
@@ -224,6 +225,6 @@ def plan_playlists(
         features.version,
         quality,
         chosen,
-        resolved.reports,
+        run.categories.reports,
         timings,
     )

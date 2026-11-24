@@ -30,12 +30,34 @@ _STOPWORDS = frozenset({"a", "an", "and", "for", "in", "music", "of", "songs", "
 
 @dataclass(frozen=True)
 class ResolvedCategories:
-    """Categories that become playlists, in playlist order, with their prototype rows."""
+    """Candidate category playlists with their prototype rows: required categories first
+    (in the user's order), then supported preferred ones, strongest first."""
 
     categories: tuple[Category, ...]
     origins: tuple[PlaylistOrigin, ...]
     prototypes: np.ndarray
     reports: tuple[CategoryReport, ...]
+
+    @property
+    def n_required(self) -> int:
+        return sum(c.required for c in self.categories)
+
+    def for_count(self, k: int) -> ResolvedCategories:
+        """The categories used at ``k`` playlists: every required one, then as many preferred
+        ones as fit. Preferences fill slots; they never raise the playlist count."""
+        used = max(self.n_required, min(len(self.categories), k))
+        if used == len(self.categories):
+            return self
+        unused = {c.name for c in self.categories[used:]}
+        reports = tuple(
+            r.model_copy(update={"kept": False, "note": "no free slot at the selected count"})
+            if r.name in unused
+            else r
+            for r in self.reports
+        )
+        return ResolvedCategories(
+            self.categories[:used], self.origins[:used], self.prototypes[:used], reports
+        )
 
 
 def _words(name: str) -> list[str]:
@@ -113,17 +135,9 @@ def resolve_categories(
     )
     kept_preferred = {s[0].name for s in preferred[: max(preferred_slots, 0)]}
 
-    kept, origins, vectors, reports = [], [], [], []
-    for category, vector, terms, support, evidence in scored:
+    reports = []
+    for category, _, terms, support, evidence in scored:
         keep = category.required or category.name in kept_preferred
-        if keep:
-            kept.append(category)
-            origins.append(
-                PlaylistOrigin.REQUIRED_CATEGORY
-                if category.required
-                else PlaylistOrigin.PREFERRED_CATEGORY
-            )
-            vectors.append(vector)
         note = ""
         if not keep:
             note = "not enough evidence" if evidence is not Evidence.STRONG else "no free slot"
@@ -142,5 +156,11 @@ def resolve_categories(
                 note=note,
             )
         )
-    matrix = np.vstack(vectors) if vectors else np.zeros((0, len(features.columns)))
-    return ResolvedCategories(tuple(kept), tuple(origins), matrix, tuple(reports))
+    ordered = [s for s in scored if s[0].required]
+    ordered += [s for s in preferred if s[0].name in kept_preferred]
+    matrix = np.vstack([s[1] for s in ordered]) if ordered else np.zeros((0, len(features.columns)))
+    origins = tuple(
+        PlaylistOrigin.REQUIRED_CATEGORY if s[0].required else PlaylistOrigin.PREFERRED_CATEGORY
+        for s in ordered
+    )
+    return ResolvedCategories(tuple(s[0] for s in ordered), origins, matrix, tuple(reports))

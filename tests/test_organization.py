@@ -156,3 +156,32 @@ def test_missing_features_are_explicit_never_guessed():
 def test_contradictory_configurations_are_rejected(settings):
     with pytest.raises(ValidationError):
         OrganizationConfig(**settings)
+
+
+def _preferred(*names):
+    return tuple(Category(name=n, required=False) for n in names)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"mode": OrganizationMode.AUTO}, {"min_playlists": 1, "max_playlists": 6}],
+)
+def test_preferred_categories_never_force_extra_playlists(settings):
+    identical = [TrackDescriptor(str(i), ("Jazz", "Rock"), (), (), None) for i in range(24)]
+    plain = organize(identical, **settings)
+    preferred = organize(identical, **settings, categories=_preferred("Jazz", "Rock"))
+
+    assert len(plain.playlists) == len(preferred.playlists) == 1
+    assert [c.kept for c in preferred.categories] == [True, False]  # One slot, one preference.
+
+
+def test_supported_preferences_fill_available_slots():
+    tracks = library()
+    auto = organize(tracks, mode=OrganizationMode.AUTO, categories=_preferred("Hip-Hop", "Polka"))
+    assert len(auto.playlists) == 4
+    origins = {p.name: p.origin for p in auto.playlists}
+    assert origins["Hip-Hop"] is PlaylistOrigin.PREFERRED_CATEGORY
+    assert not auto.categories[1].kept  # Polka has no evidence.
+
+    exact = organize(tracks, playlists=3, categories=_preferred("Hip-Hop", "Classical"))
+    assert sum(p.origin is PlaylistOrigin.PREFERRED_CATEGORY for p in exact.playlists) == 2
