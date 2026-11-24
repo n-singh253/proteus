@@ -15,6 +15,8 @@ def test_versions_and_conflicting_signals_stay_separate():
     assert index.resolve(record("d", "Song", duration_ms=260_000)) is None
     assert index.resolve(record("e", "Song", duration_ms=200_000, isrc="USBBB0000002")) is None
     assert index.resolve(record("f", "Song", duration_ms=None)) is None
+    assert index.resolve(record("g", "Song (Live)", isrc="USAAA0000001")) is None
+    assert "kept separate" in index.conflicts[0]
 
 
 def test_reliable_identifiers_and_exact_metadata_merge():

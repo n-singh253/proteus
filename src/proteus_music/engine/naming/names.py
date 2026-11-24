@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 
 from proteus_music.engine.features.metadata import TrackDescriptor
 from proteus_music.library.identity import normalize_text
 
+# Genre, tag and artist strings repeat across thousands of tracks; normalize each once.
+_normalized = lru_cache(maxsize=1 << 16)(normalize_text)
 _ROMAN = ("II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
 _MIN_SHARE = 0.25
 
@@ -35,6 +38,12 @@ class _Term:
     score: float
 
 
+def _display(forms: Counter[str]) -> str:
+    """Most common original spelling; all-lowercase tags are title-cased for display."""
+    form = forms.most_common(1)[0][0]
+    return form.title() if form.islower() else form
+
+
 class _Vocabulary:
     """Library-wide term frequencies, used to find what makes each playlist distinctive."""
 
@@ -42,26 +51,30 @@ class _Vocabulary:
         self.size = max(len(descriptors), 1)
         self.counts = {f: self._count(descriptors, get) for f, get in _FIELDS.items()}
         self.display: dict[str, Counter[str]] = {}
+        self._terms: dict[tuple[int, str], list[_Term]] = {}
         for get in _FIELDS.values():
             for d in descriptors:
                 for value in get(d):
-                    self.display.setdefault(normalize_text(value), Counter())[value] += 1
+                    self.display.setdefault(_normalized(value), Counter())[value] += 1
 
     @staticmethod
     def _count(descriptors: Sequence[TrackDescriptor], get: Extractor) -> Counter[str]:
-        return Counter(k for d in descriptors for k in {normalize_text(v) for v in get(d)} if k)
+        return Counter(k for d in descriptors for k in {_normalized(v) for v in get(d)} if k)
 
     def terms(self, group: Sequence[TrackDescriptor], field: str) -> list[_Term]:
-        if not group:
-            return []
+        """Terms of ``group`` ranked by distinctiveness; cached per group object and field."""
+        key = (id(group), field)
+        if key not in self._terms:
+            self._terms[key] = self._rank(group, field) if group else []
+        return self._terms[key]
+
+    def _rank(self, group: Sequence[TrackDescriptor], field: str) -> list[_Term]:
         local = self._count(group, _FIELDS[field])
         terms = []
         for key, count in local.items():
             share = count / len(group)
             lift = share / (self.counts[field][key] / self.size)
-            terms.append(
-                _Term(self.display[key].most_common(1)[0][0], share, share * math.log1p(lift))
-            )
+            terms.append(_Term(_display(self.display[key]), share, share * math.log1p(lift)))
         return sorted(terms, key=lambda t: (-t.score, t.display))
 
 
@@ -107,16 +120,26 @@ def _describe(vocab: _Vocabulary, group: Sequence[TrackDescriptor]) -> str:
     return " ".join(parts)
 
 
-def label_playlists(groups: Sequence[Sequence[TrackDescriptor]]) -> list[PlaylistLabel]:
-    """Distinct names and descriptions per group; larger groups claim names first."""
+def _name_key(name: str) -> str:
+    """Collision key that treats 'Hip-Hop & Rap' and 'rap and hip hop' as the same name."""
+    return " ".join(sorted(normalize_text(name).split()))
+
+
+def label_playlists(
+    groups: Sequence[Sequence[TrackDescriptor]], fixed_names: Mapping[int, str] | None = None
+) -> list[PlaylistLabel]:
+    """Names and descriptions per group. ``fixed_names`` (user categories, unclassified) are
+    kept verbatim; other groups get distinct names, larger groups choosing first."""
+    fixed = dict(fixed_names or {})
     vocab = _Vocabulary([d for g in groups for d in g])
-    names: dict[int, str] = {}
-    used: set[str] = set()
-    for index in sorted(range(len(groups)), key=lambda i: -len(groups[i])):
+    names: dict[int, str] = dict(fixed)
+    used = {_name_key(n) for n in fixed.values()}
+    free = [i for i in range(len(groups)) if i not in fixed]
+    for index in sorted(free, key=lambda i: -len(groups[i])):
         candidates = _candidates(vocab, groups[index]) if groups[index] else ["Empty"]
         name = next(
-            (c for c in candidates if c.casefold() not in used), f"{candidates[0]} {index + 1}"
+            (c for c in candidates if _name_key(c) not in used), f"{candidates[0]} {index + 1}"
         )
-        used.add(name.casefold())
+        used.add(_name_key(name))
         names[index] = name
     return [PlaylistLabel(names[i], _describe(vocab, g)) for i, g in enumerate(groups)]

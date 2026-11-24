@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 
 from proteus_music.config import default_database_path
@@ -38,6 +39,10 @@ def handled_errors() -> Iterator[None]:
         for reason in exc.reasons:
             errors.print(f"  - {reason}")
         raise typer.Exit(EXIT_INFEASIBLE) from None
+    except ValidationError as exc:
+        messages = (e["msg"].removeprefix("Value error, ") for e in exc.errors())
+        errors.print(f"[bold red]Invalid configuration:[/] {'; '.join(messages)}")
+        raise typer.Exit(EXIT_ERROR) from None
     except (LookupError, ValueError, OSError) as exc:
         errors.print(f"[bold red]Error:[/] {exc}")
         raise typer.Exit(EXIT_ERROR) from None

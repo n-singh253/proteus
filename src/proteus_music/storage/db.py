@@ -57,6 +57,10 @@ MIGRATIONS: tuple[str, ...] = (
         FOREIGN KEY (run_id, playlist_idx) REFERENCES playlists(run_id, idx) ON DELETE CASCADE
     );
     """,
+    """
+    ALTER TABLE organization_runs ADD COLUMN details TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE playlists ADD COLUMN origin TEXT NOT NULL DEFAULT 'discovered';
+    """,
 )
 
 

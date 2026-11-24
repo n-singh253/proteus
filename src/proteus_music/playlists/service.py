@@ -9,7 +9,7 @@ from pathlib import Path
 
 from proteus_music.engine.evaluation.validation import validate_result
 from proteus_music.engine.features.metadata import describe
-from proteus_music.engine.pipeline import plan_playlists
+from proteus_music.engine.pipeline import PlaylistPlan, plan_playlists
 from proteus_music.integrations.contract import AdapterInfo, ExportOptions, ExportReport
 from proteus_music.integrations.files import csv_format, json_format, m3u
 from proteus_music.integrations.local import scanner
@@ -32,20 +32,36 @@ ADAPTERS: tuple[AdapterInfo, ...] = (
 )
 
 
-def organize_library(conn: sqlite3.Connection, config: OrganizationConfig) -> OrganizationResult:
-    """Organize every canonical track into exclusive playlists, validate, and save the result."""
-    tracks = load_tracks(conn)
-    plan = plan_playlists([describe(t) for t in tracks], config)
-    result = OrganizationResult(
+def new_result(
+    plan: PlaylistPlan, config: OrganizationConfig, track_ids: tuple[str, ...], notes: tuple = ()
+) -> OrganizationResult:
+    return OrganizationResult(
         id=uuid.uuid4().hex[:12],
         created_at=datetime.now(UTC),
         config=config,
         feature_version=plan.feature_version,
-        snapshot_track_ids=tuple(t.id for t in tracks),
+        snapshot_track_ids=track_ids,
         playlists=plan.playlists,
         assignments=plan.assignments,
-        warnings=plan.warnings,
+        warnings=(*notes, *plan.warnings),
+        quality=plan.quality,
+        selection=plan.selection,
+        categories=plan.categories,
     )
+
+
+def organize_library(conn: sqlite3.Connection, config: OrganizationConfig) -> OrganizationResult:
+    """Organize every canonical track into exclusive playlists, validate, and save the result."""
+    tracks = load_tracks(conn)
+    restricted = sum(1 for t in tracks if not t.analysis_records)
+    notes = ()
+    if restricted:
+        notes = (
+            f"{restricted} identification-only track(s) are assigned but contribute no "
+            "analysis features",
+        )
+    plan = plan_playlists([describe(t) for t in tracks], config)
+    result = new_result(plan, config, tuple(t.id for t in tracks), notes)
     validate_result(result)
     result_store.save_result(conn, result)
     return result
@@ -59,6 +75,7 @@ def get_result(conn: sqlite3.Connection, result_id: str | None = None) -> Organi
     result = result_store.load_result(conn, result_id)
     if result is None:
         raise LookupError(f"no organization result with ID {result_id!r}")
+    validate_result(result)
     return result
 
 
@@ -73,6 +90,5 @@ def export_result(
     if target not in EXPORTERS:
         raise ValueError(f"unknown export target {target!r}; available: {', '.join(EXPORTERS)}")
     result = get_result(conn, result_id)
-    validate_result(result)
     tracks = {t.id: t for t in load_tracks(conn)}
     return EXPORTERS[target](result, tracks, out_dir.expanduser(), options)

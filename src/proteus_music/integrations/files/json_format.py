@@ -42,6 +42,7 @@ class JsonTrack(BaseModel):
     isrc: str | None = None
     musicbrainz_recording_id: str | None = None
     path: str | None = None
+    analysis_permitted: bool = True
 
     @field_validator("artists", "genres", "tags", mode="before")
     @classmethod
@@ -87,8 +88,8 @@ def read_json(path: Path, *, analysis_permitted: bool = True) -> ImportBatch:
                     source="json",
                     source_key=key,
                     local_path=local_path,
-                    analysis_permitted=analysis_permitted,
-                    **item.model_dump(exclude={"id", "path"}),
+                    analysis_permitted=analysis_permitted and item.analysis_permitted,
+                    **item.model_dump(exclude={"id", "path", "analysis_permitted"}),
                 )
             )
         except ValidationError as exc:
@@ -110,6 +111,7 @@ def _track_object(track: Track) -> dict[str, Any]:
         "isrc": track.isrc,
         "musicbrainz_recording_id": track.musicbrainz_recording_id,
         "path": track.local_path,
+        "analysis_permitted": track.exportable_for_analysis,
     }
 
 

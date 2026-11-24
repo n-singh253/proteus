@@ -20,9 +20,16 @@ class AssignmentQuality:
 
 
 def assess(
-    scores: np.ndarray, labels: np.ndarray, available: np.ndarray
+    scores: np.ndarray,
+    labels: np.ndarray,
+    available: np.ndarray,
+    core: np.ndarray | None = None,
 ) -> list[AssignmentQuality]:
-    """Similarity to the assigned playlist, margin over the best alternative, and flags."""
+    """Similarity to the assigned playlist, margin over the best alternative, and flags.
+
+    Rows that are available but not ``core`` are flagged partial-features.
+    """
+    core = available if core is None else core
     n, k = scores.shape
     rows = np.arange(n)
     chosen = scores[rows, labels]
@@ -31,11 +38,15 @@ def assess(
     best_other = others.max(axis=1) if k > 1 else np.zeros(n)
     margins = chosen - best_other
     qualities = []
-    for similarity, margin, has_features in zip(chosen, margins, available, strict=True):
+    for similarity, margin, has_features, is_core in zip(
+        chosen, margins, available, core, strict=True
+    ):
         flags: list[AssignmentFlag] = []
         if not has_features:
             flags.append(AssignmentFlag.MISSING_FEATURES)
         else:
+            if not is_core:
+                flags.append(AssignmentFlag.PARTIAL_FEATURES)
             if similarity < LOW_SIMILARITY:
                 flags.append(AssignmentFlag.LOW_SIMILARITY)
             if margin < 0:

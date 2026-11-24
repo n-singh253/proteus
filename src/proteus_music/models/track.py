@@ -74,3 +74,12 @@ class Track(BaseModel):
     @property
     def analysis_records(self) -> tuple[TrackRecord, ...]:
         return tuple(r for r in self.records if r.analysis_permitted)
+
+    @property
+    def exportable_for_analysis(self) -> bool:
+        """Whether a portable export may mark this track's metadata as analyzable.
+
+        Canonical fields can come from any record, so a single restricted record makes the
+        whole exported track identification-only; restrictions must survive a round trip.
+        """
+        return all(r.analysis_permitted for r in self.records)

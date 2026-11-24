@@ -90,6 +90,23 @@ def test_import_organize_export_round_trip(tmp_path: Path):
         in invoke(copy_db, "import", "json", str(out / "organization.json")).output
     )
 
+    auto = invoke(db, "organize", "--mode", "auto")
+    assert auto.exit_code == 0 and "Constraints satisfied" in auto.output
+
+
+def test_identification_only_survives_export_and_reimport(tmp_path: Path):
+    db, out = tmp_path / "lib.db", tmp_path / "out"
+    write_library_csv(tmp_path / "library.csv")
+    invoke(db, "import", "csv", str(tmp_path / "library.csv"), "--identification-only")
+    invoke(db, "organize", "-n", "1")
+    for target in ("json", "csv"):
+        assert invoke(db, "export", "--target", target, "--out", str(out)).exit_code == 0
+
+    for name, exported in (("json", "organization.json"), ("csv", "playlists.csv")):
+        copy = tmp_path / f"{name}.db"
+        invoke(copy, "import", name, str(out / exported))
+        assert "identification-only (excluded from analysis): 18" in invoke(copy, "library").output
+
 
 def test_infeasible_request_exits_with_reasons(tmp_path: Path):
     write_library_csv(tmp_path / "library.csv")

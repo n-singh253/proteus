@@ -12,18 +12,19 @@ from proteus_music.models.organization import OrganizationConfig
 
 
 def test_constrained_assignment_is_optimal_and_respects_sizes():
+    # 5 playlists exceed the 4 initial candidates per track, exercising column generation.
     rng = np.random.default_rng(7)
-    scores = rng.random((7, 3))
+    scores = rng.random((7, 5))
     scores[:, 0] += 1.0  # Unconstrained, every track would pick playlist 0.
 
-    labels = assign(scores, min_size=2, max_size=3)
+    labels = assign(scores, min_size=1, max_size=2)
 
-    sizes = np.bincount(labels, minlength=3)
-    assert labels.shape == (7,) and sizes.min() >= 2 and sizes.max() <= 3
+    sizes = np.bincount(labels, minlength=5)
+    assert labels.shape == (7,) and sizes.min() >= 1 and sizes.max() <= 2
     best = max(
         sum(scores[i, j] for i, j in enumerate(combo))
-        for combo in itertools.product(range(3), repeat=7)
-        if all(2 <= combo.count(j) <= 3 for j in range(3))
+        for combo in itertools.product(range(5), repeat=7)
+        if all(1 <= combo.count(j) <= 2 for j in range(5))
     )
     assert scores[np.arange(7), labels].sum() == pytest.approx(best)
 

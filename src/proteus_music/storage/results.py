@@ -9,9 +9,9 @@ from datetime import datetime
 from proteus_music.models.organization import (
     Assignment,
     AssignmentFlag,
-    OrganizationConfig,
     OrganizationResult,
     Playlist,
+    PlaylistOrigin,
 )
 
 
@@ -19,7 +19,7 @@ def save_result(conn: sqlite3.Connection, result: OrganizationResult) -> None:
     with conn:
         conn.execute(
             "INSERT INTO organization_runs (id, created_at, config, feature_version, snapshot,"
-            " warnings) VALUES (?, ?, ?, ?, ?, ?)",
+            " warnings, details) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 result.id,
                 result.created_at.isoformat(),
@@ -27,12 +27,16 @@ def save_result(conn: sqlite3.Connection, result: OrganizationResult) -> None:
                 result.feature_version,
                 json.dumps(result.snapshot_track_ids),
                 json.dumps(result.warnings),
+                result.model_dump_json(include={"quality", "selection", "categories"}),
             ),
         )
         conn.executemany(
-            "INSERT INTO playlists (run_id, idx, name, description, cohesion)"
-            " VALUES (?, ?, ?, ?, ?)",
-            [(result.id, p.index, p.name, p.description, p.cohesion) for p in result.playlists],
+            "INSERT INTO playlists (run_id, idx, name, description, cohesion, origin)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (result.id, p.index, p.name, p.description, p.cohesion, p.origin)
+                for p in result.playlists
+            ],
         )
         by_track = {a.track_id: a for a in result.assignments}
         conn.executemany(
@@ -91,6 +95,7 @@ def load_result(conn: sqlite3.Connection, result_id: str) -> OrganizationResult 
             description=p["description"],
             track_ids=tuple(members.get(p["idx"], ())),
             cohesion=p["cohesion"],
+            origin=PlaylistOrigin(p["origin"]),
         )
         for p in conn.execute("SELECT * FROM playlists WHERE run_id = ? ORDER BY idx", (result_id,))
     )
@@ -104,13 +109,16 @@ def load_result(conn: sqlite3.Connection, result_id: str) -> OrganizationResult 
         )
         for row in rows
     )
-    return OrganizationResult(
-        id=run["id"],
-        created_at=datetime.fromisoformat(run["created_at"]),
-        config=OrganizationConfig.model_validate_json(run["config"]),
-        feature_version=run["feature_version"],
-        snapshot_track_ids=tuple(json.loads(run["snapshot"])),
-        playlists=playlists,
-        assignments=assignments,
-        warnings=tuple(json.loads(run["warnings"])),
+    return OrganizationResult.model_validate(
+        {
+            **json.loads(run["details"]),
+            "id": run["id"],
+            "created_at": run["created_at"],
+            "config": json.loads(run["config"]),
+            "feature_version": run["feature_version"],
+            "snapshot_track_ids": json.loads(run["snapshot"]),
+            "playlists": playlists,
+            "assignments": assignments,
+            "warnings": json.loads(run["warnings"]),
+        }
     )

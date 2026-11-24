@@ -42,11 +42,13 @@ DEFAULT_COLUMNS: dict[str, tuple[str, ...]] = {
     "isrc": ("isrc",),
     "musicbrainz_recording_id": ("musicbrainz_recording_id", "musicbrainz recording id", "mbid"),
     "path": ("path", "location", "file", "filename"),
+    "analysis_permitted": ("analysis_permitted",),
 }
+_BOOLEANS = {"true": True, "1": True, "yes": True, "false": False, "0": False, "no": False}
 
 EXPORT_COLUMNS = (
     "playlist", "position", "title", "artists", "album", "duration_ms", "year", "isrc",
-    "path", "similarity", "flags",
+    "path", "similarity", "flags", "analysis_permitted",
 )  # fmt: skip
 
 
@@ -87,6 +89,9 @@ def _row_record(
         else:
             warning = f"file not found, imported without local path: {resolved}"
     title, artists = get("title") or "", fields.split_list(get("artists"), separator)
+    flag = (get("analysis_permitted") or "true").lower()
+    if flag not in _BOOLEANS:
+        raise ValueError(f"analysis_permitted must be true or false, got {flag!r}")
     record = TrackRecord(
         source="csv",
         source_key=get("id")
@@ -102,7 +107,7 @@ def _row_record(
         isrc=get("isrc"),
         musicbrainz_recording_id=get("musicbrainz_recording_id"),
         local_path=local_path,
-        analysis_permitted=permitted,
+        analysis_permitted=permitted and _BOOLEANS[flag],
     )
     return record, warning
 
@@ -157,6 +162,6 @@ def write_result(
                     playlist.name, position, track.title, "; ".join(track.artists),
                     track.album or "", track.duration_ms or "", track.year or "",
                     track.isrc or "", track.local_path or "", f"{assignment.similarity:.4f}",
-                    "; ".join(assignment.flags),
+                    "; ".join(assignment.flags), str(track.exportable_for_analysis).lower(),
                 ])  # fmt: skip
     return ExportReport("csv", (str(target),), len(result.assignments))

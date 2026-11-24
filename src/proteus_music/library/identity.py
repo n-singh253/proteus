@@ -2,7 +2,8 @@
 
 Records merge only on a shared ISRC, a shared MusicBrainz recording ID, or an exact match of
 normalized title, primary artist and version descriptor with compatible durations. Distinct
-versions (live, remix, remaster, ...) never merge, and ambiguous cases stay separate.
+versions (live, remix, remaster, ...) never merge, even when a shared identifier says otherwise:
+such identifier/version conflicts stay separate and are reported for review.
 """
 
 from __future__ import annotations
@@ -75,6 +76,11 @@ class _Entry:
     isrc: str | None
     mbid: str | None
     duration_ms: int | None
+    version: str
+
+
+def _version(record: TrackRecord) -> str:
+    return identity_key(record)[2]
 
 
 def _compatible(entry: _Entry, record: TrackRecord) -> bool:
@@ -94,9 +100,10 @@ class IdentityIndex:
     """In-memory lookup from identifying signals to canonical track IDs."""
 
     def __init__(self) -> None:
-        self._by_isrc: dict[str, str] = {}
-        self._by_mbid: dict[str, str] = {}
+        self._by_isrc: dict[str, _Entry] = {}
+        self._by_mbid: dict[str, _Entry] = {}
         self._by_key: defaultdict[tuple[str, str, str], list[_Entry]] = defaultdict(list)
+        self.conflicts: list[str] = []
 
     @classmethod
     def from_tracks(cls, tracks: Iterable[Track]) -> IdentityIndex:
@@ -107,20 +114,35 @@ class IdentityIndex:
         return index
 
     def resolve(self, record: TrackRecord) -> str | None:
-        if record.isrc and record.isrc in self._by_isrc:
-            return self._by_isrc[record.isrc]
-        mbid = record.musicbrainz_recording_id
-        if mbid and mbid in self._by_mbid:
-            return self._by_mbid[mbid]
+        """Matching canonical track ID, or None (identifier/version conflicts never merge)."""
+        version = _version(record)
+        for label, value, table in (
+            ("ISRC", record.isrc, self._by_isrc),
+            ("MusicBrainz ID", record.musicbrainz_recording_id, self._by_mbid),
+        ):
+            entry = table.get(value) if value else None
+            if entry is None:
+                continue
+            if entry.version == version:
+                return entry.track_id
+            self.conflicts.append(
+                f"'{record.title}' shares {label} {value} with track {entry.track_id} but has "
+                f"version '{version or 'original'}' vs '{entry.version or 'original'}'; "
+                "kept separate"
+            )
+            return None
         for entry in self._by_key.get(identity_key(record), ()):
             if _compatible(entry, record):
                 return entry.track_id
         return None
 
     def add(self, track_id: str, record: TrackRecord) -> None:
+        key = identity_key(record)
+        entry = _Entry(
+            track_id, record.isrc, record.musicbrainz_recording_id, record.duration_ms, key[2]
+        )
         if record.isrc:
-            self._by_isrc.setdefault(record.isrc, track_id)
+            self._by_isrc.setdefault(record.isrc, entry)
         if record.musicbrainz_recording_id:
-            self._by_mbid.setdefault(record.musicbrainz_recording_id, track_id)
-        entry = _Entry(track_id, record.isrc, record.musicbrainz_recording_id, record.duration_ms)
-        self._by_key[identity_key(record)].append(entry)
+            self._by_mbid.setdefault(record.musicbrainz_recording_id, entry)
+        self._by_key[key].append(entry)

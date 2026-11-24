@@ -7,7 +7,7 @@ from typing import Protocol
 import numpy as np
 from scipy import sparse
 
-from proteus_music.engine.clustering.kmeans import CosineKMeans
+from proteus_music.engine.clustering.kmeans import CosineKMeans, MergedKMeans
 
 
 class Clusterer(Protocol):
@@ -16,7 +16,10 @@ class Clusterer(Protocol):
         ...
 
 
-CLUSTERERS: dict[str, Clusterer] = {"spherical-kmeans": CosineKMeans()}
+CLUSTERERS: dict[str, Clusterer] = {
+    "spherical-kmeans": CosineKMeans(),
+    "kmeans-merge": MergedKMeans(),
+}
 
 
 def get_clusterer(name: str) -> Clusterer:

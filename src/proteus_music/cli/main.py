@@ -19,7 +19,7 @@ from proteus_music.cli.common import (
 )
 from proteus_music.integrations.contract import ExportOptions
 from proteus_music.library.service import library_stats
-from proteus_music.models.organization import OrganizationConfig
+from proteus_music.models.organization import Category, OrganizationConfig, OrganizationMode
 from proteus_music.playlists import service
 from proteus_music.storage import results as result_store
 from proteus_music.storage.tracks import load_tracks
@@ -63,24 +63,47 @@ def sources() -> None:
         console.print(f"[bold]{adapter.name}[/] ({caps}): {adapter.description}", highlight=False)
 
 
+def _categories(names: str | None, required: bool) -> list[Category]:
+    return [Category(name=n, required=required) for n in (names or "").split(",") if n.strip()]
+
+
 @app.command()
 def organize(
     ctx: typer.Context,
     playlists: Annotated[
-        int, typer.Option("--playlists", "-n", min=1, help="Exact playlist count.")
-    ],
+        int | None, typer.Option("--playlists", "-n", min=1, help="Exact playlist count.")
+    ] = None,
+    min_playlists: Annotated[
+        int | None, typer.Option(min=1, help="Range: fewest playlists.")
+    ] = None,
+    max_playlists: Annotated[int | None, typer.Option(min=1, help="Range: most playlists.")] = None,
+    categories: Annotated[
+        str | None, typer.Option(help='Required categories, comma-separated: "Hip-Hop,R&B".')
+    ] = None,
+    prefer_categories: Annotated[
+        str | None, typer.Option(help="Preferred categories, created only when supported.")
+    ] = None,
+    mode: Annotated[
+        OrganizationMode, typer.Option(help="guided (count/categories given) or auto.")
+    ] = OrganizationMode.GUIDED,
     min_size: Annotated[int, typer.Option(min=1, help="Minimum tracks per playlist.")] = 1,
     max_size: Annotated[
         int | None, typer.Option(min=1, help="Maximum tracks per playlist.")
     ] = None,
-    algorithm: Annotated[str, typer.Option(help="Clustering algorithm.")] = "spherical-kmeans",
+    algorithm: Annotated[
+        str, typer.Option(help="Clustering algorithm: kmeans-merge or spherical-kmeans.")
+    ] = "kmeans-merge",
     seed: Annotated[int, typer.Option(help="Random seed for reproducibility.")] = 0,
     as_json: JsonFlag = False,
 ) -> None:
     """Organize the whole library into exclusive playlists and save the result."""
     with handled_errors():
         config = OrganizationConfig(
+            mode=mode,
             playlists=playlists,
+            min_playlists=min_playlists,
+            max_playlists=max_playlists,
+            categories=(*_categories(categories, True), *_categories(prefer_categories, False)),
             min_size=min_size,
             max_size=max_size,
             algorithm=algorithm,

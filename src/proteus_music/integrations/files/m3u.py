@@ -139,8 +139,9 @@ def write_result(
                 reason = f"no local file for '{track.title}' (playlist '{playlist.name}')"
                 unexportable.append(ImportIssue(track_id, reason))
                 continue
-            seconds = round(track.duration_ms / 1000) if track.duration_ms else -1
-            lines.append(f"#EXTINF:{seconds},{', '.join(track.artists)} - {track.title}")
+            if track.exportable_for_analysis:  # M3U cannot carry restrictions, so omit metadata.
+                seconds = round(track.duration_ms / 1000) if track.duration_ms else -1
+                lines.append(f"#EXTINF:{seconds},{', '.join(track.artists)} - {track.title}")
             lines.append(_entry_path(track.local_path, out_dir, options.relative_paths))
             exported += 1
         if (

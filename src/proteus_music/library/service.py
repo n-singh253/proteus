@@ -59,7 +59,10 @@ def import_batch(conn: sqlite3.Connection, batch: ImportBatch) -> ImportSummary:
         matched_existing=matched,
         refreshed_records=refreshed,
         failures=batch.failures,
-        warnings=batch.warnings,
+        warnings=(
+            *batch.warnings,
+            *(ImportIssue("identity", conflict) for conflict in index.conflicts),
+        ),
     )
 
 
