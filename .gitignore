@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Rust and native builds
+/target/
+**/target/
+*.so
+*.pyd
+*.dylib
+
+# Frontend and packaging
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Local data and generated artifacts
+/data/
+/models/
+/exports/
+/artifacts/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.aac
+*.ogg
+*.opus
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# Local tooling and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Documentation
+AGENTS.md
